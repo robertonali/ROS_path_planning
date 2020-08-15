@@ -11,7 +11,7 @@ find_package(catkin REQUIRED COMPONENTS
   ackermann_msgs
   geometry_msgs
   nav_msgs
-  rosccp
+  roscpp
   rospy
   sensor_msgs
   std_msgs
@@ -109,7 +109,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES ros_wall_follower
-#  CATKIN_DEPENDS ackermann_msgs geometry_msgs nav_msgs rosccp rospy sensor_msgs std_msgs
+#  CATKIN_DEPENDS ackermann_msgs geometry_msgs nav_msgs roscpp rospy sensor_msgs std_msgs
 #  DEPENDS system_lib
 )
 
