@@ -5,10 +5,11 @@ from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
 from collections import defaultdict
+from tf import transformations
+import math
 
 class WallFollower(object):
     def __init__(self):
-
         self.acker_msg = AckermannDriveStamped()
         self.regions = defaultdict(lambda:float)
         self.gains = {
@@ -28,8 +29,13 @@ class WallFollower(object):
         rospy.init_node("ros_wall_follower_node")
         self.sub_laser = rospy.Subscriber("/scan", LaserScan, self.laserCallback, queue_size=1)
         self.pub_drive = rospy.Publisher("/drive", AckermannDriveStamped, queue_size=1)
+        self.odom_= rospy.Subscriber("/odom", Odometry,self.odomCallback,queue_size=1)
         rospy.Timer(rospy.Duration(self.dt), self.timerCallback)
     
+    def odomCallback(self, msg):
+        self.x = msg.pose.pose.position.x
+        self.y = msg.pose.pose.position.y
+            
     def laserCallback(self, msg):
         self.regions = {
             'DER'   : min(min(msg.ranges[230:250]), 30),
@@ -70,17 +76,17 @@ class WallFollower(object):
         if self.regions['FRONT'] <= 0.2:
             self.vel= -5.0
             signo = -1 if (self.steering_output >= 0) else 1
-            self.steering_output = signo * self.steering_output
+            self.steering_output = signo
         elif self.regions['FRONT']< 0.9 and self.regions['FRONT']> 0.2: 
             signo = -1 if (self.steering_output >= 0) else 1
-            self.steering_output = signo * self.steering_output if self.vel == -5.0 else self.steering_output * 1
+            self.steering_output = signo if self.vel == -5.0 else self.steering_output * 1
         elif self.regions['FRONT']< 1.4 and self.regions['FRONT']> 0.9:
             self.vel = 1.0
         elif self.regions['FRONT'] > 1.4:
             self.vel= 2.0
         self.setCarMovement(self.steering_output, 0.08,self.vel, 0.0, 0.0)
         # rospy.loginfo(self.pa_donde)
-        self.pub_drive.publish(self.acker_msg)
+        #self.pub_drive.publish(self.acker_msg)
 
     def calcControl(self):
         self.error[0] = self.setpoint - self.regions['DER']
@@ -112,6 +118,7 @@ class WallFollower(object):
 
     def timerCallback(self, event):
         self.takeAction()
+        rospy.loginfo("x:{}, y:{}, ".format(self.x,self.y))
         rospy.loginfo("{}, {}, {}, {}, {}".format(self.pa_donde, self.acker_msg.drive.steering_angle, self.acker_msg.drive.speed, self.regions['DER'],self.regions['FRONT']))
         self.pub_drive.publish(self.acker_msg)
 
@@ -120,5 +127,4 @@ if __name__ == "__main__":
     robot = WallFollower()
     # robot.main()
     rospy.spin()
-
     
