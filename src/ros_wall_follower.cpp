@@ -3,6 +3,8 @@
 #include <ackermann_msgs/AckermannDriveStamped.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/LaserScan.h>
+#include <fstream>
+#include <iostream>
 
 #define FLOAT32_ARRAY_SIZE(x) sizeof(x)/sizeof(float)
 #define MAX_SCAN_POINTS 1080
@@ -55,6 +57,11 @@ typedef struct ranges_index_S
     int end;
 } ranges_index_s;
 
+typedef struct odom_coord_S
+{
+    float32_t x;
+    float32_t y;
+} odom_coord_s;
 
 class WallFollower
 {
@@ -62,11 +69,14 @@ private:
     ros::Timer            _timer;
     ros::Publisher        _drive_pub;
     ros::Subscriber       _laser_sub;
+    ros::Subscriber       _odom_sub;
     LaserScan             _laser;
     AckermannDriveStamped _car;
-    Odometry              _position;
+    Odometry              _odom;
+    uint                  _timer_count;
 
     void _scanCallback(const sensor_msgs::LaserScan &msg);
+    void _odomCallback(const nav_msgs::Odometry &msg);
     void _timerCallback(const ros::TimerEvent &event);
 
 public:
@@ -78,23 +88,27 @@ public:
     void calculateControl(void);
     void takeAction(void);
     void publishAckermannMsg(void);
+    void outputCSV(void);
 
-    laser_read_s      laser_read;
-    pid_control_s     control;
-    steering_params_s steer;
-    float32_t         car_speed;
-    const ranges_index_s    scan_points[NUM_REGIONS] =
+    laser_read_s              laser_read;
+    pid_control_s             control;
+    steering_params_s         steer;
+    float32_t                 car_speed;
+    std::vector<odom_coord_s> waypoints;
+    std::fstream              fout;
+    uint                      csv_count;
+    const ranges_index_s      scan_points[NUM_REGIONS] =
     {
-        {230, 250}, // 0 - DER
-        {251, 420}, // 1 - FR_DER
+        {107, 322}, // 0 - DER
+        {323, 420}, // 1 - FR_DER
         {421, 660}, // 2 - FRONT
-        {661, 784}, // 1 - FR_DER
-        {785, 1079} // 4 - IZQ
+        {661, 751}, // 1 - FR_DER
+        {752, 967}  // 4 - IZQ
     };
     
 };
 
-WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car(), _position()
+WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car(), _odom()
 {
     std::string node_name = "ros_wall_follower";
     ros::init(argc, argv, node_name);
@@ -115,14 +129,20 @@ WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car
             output : 0.0,
             max_value : 1.0
         };
-    car_speed    = 2.0;
-    _drive_pub = nh.advertise<AckermannDriveStamped>("drive", 10);
-    _laser_sub = nh.subscribe("scan", 10, &WallFollower::_scanCallback, this);
-    _timer     = nh.createTimer(ros::Duration(control.dt), &WallFollower::_timerCallback, this);
+    csv_count     = 0;
+    car_speed     = 2.0;
+    _timer_count  = 10;
+    _drive_pub    = nh.advertise<AckermannDriveStamped>("drive", 10);
+    _laser_sub    = nh.subscribe("scan", 10, &WallFollower::_scanCallback, this);
+    _odom_sub     = nh.subscribe("odom", 10, &WallFollower::_odomCallback, this);
+    _timer        = nh.createTimer(ros::Duration(control.dt), &WallFollower::_timerCallback, this);
+    
+    fout.open("odom_data.csv", std::ios::out);
 }
 
 WallFollower::~WallFollower()
 {
+    fout.close();
 }
 
 void WallFollower::_scanCallback(const sensor_msgs::LaserScan &msg)
@@ -137,26 +157,25 @@ void WallFollower::_timerCallback(const ros::TimerEvent &event)
 {
     // ROS_INFO("Time elapsed: %f", event.last_real.now().toSec());
     takeAction();
+    ++_timer_count;
+}
+
+void WallFollower::_odomCallback(const nav_msgs::Odometry &msg)
+{
+    _odom = msg;
+    if(_timer_count >= 10)
+    {
+        odom_coord_s coord;
+        coord.x = _odom.pose.pose.position.x;
+        coord.y = _odom.pose.pose.position.y;
+        waypoints.push_back(coord);
+        _timer_count = 0;
+        outputCSV();
+    }
 }
 
 void WallFollower::getScanRanges(void)
 {
-    // int count = 0;
-    // for (int i = 1; i < laser_read.ranges.size(); i += (laser_read.ranges.size() / NUM_REGIONS))
-    // {
-    //     float min_val = laser_read.ranges[i];
-    //     for (int j = i; j < (laser_read.ranges.size() / NUM_REGIONS); j++)
-    //     {
-    //         min_val = (laser_read.ranges[j] < min_val) ? laser_read.ranges[j] : min_val;
-    //     }
-    //     laser_read.min_ranges[count] = min_val;
-    //     count++;
-    // }
-
-    // ROS_INFO("DER: %f, ANG_DER: %f, FRENTE: %f, ANG_IZQ: %f, IZQ: %f",
-    //          laser_read.min_ranges[DER], laser_read.min_ranges[FR_DER], laser_read.min_ranges[FRONT], \
-    //          laser_read.min_ranges[FR_IZQ], laser_read.min_ranges[IZQ]);
-    
     for (int i = 0; i < NUM_REGIONS; i++)
     {
         int j = scan_points[i].begin;
@@ -167,12 +186,16 @@ void WallFollower::getScanRanges(void)
         }
         laser_read.min_ranges[i] = min_val;   
     }
-    
+
+    // ROS_INFO("DER: %f, ANG_DER: %f, FRENTE: %f, ANG_IZQ: %f, IZQ: %f",
+    //          laser_read.min_ranges[DER], laser_read.min_ranges[FR_DER], laser_read.min_ranges[FRONT], \
+    //          laser_read.min_ranges[FR_IZQ], laser_read.min_ranges[IZQ]);
 }
 
 void WallFollower::calculateControl(void)
 {
-    control.error[0] = control.setpoint - laser_read.min_ranges[DER];
+    // control.setpoint = (laser_read.min_ranges[DER] + laser_read.min_ranges[IZQ]) / 2; // CENTRO: ESTA LINEA Y ABAJO
+    control.error[0] = control.setpoint - laser_read.min_ranges[DER]; // DERECHA SOLO ESTA LINEA
     float32_t Up = control.gains.Kp * control.error[0];
     float32_t Ui = control.gains.Ki * (control.error[0] - control.error[1]) / 2;
     float32_t Ud = control.gains.Kd * (1 / control.dt) * (control.error[0] - control.error[1]);
@@ -228,6 +251,12 @@ void WallFollower::setCarMovement(float32_t steering_angle, float32_t steering_a
 void WallFollower::publishAckermannMsg(void)
 {
     _drive_pub.publish(_car);
+}
+
+void WallFollower::outputCSV(void)
+{
+    fout << waypoints[csv_count].x << "," << waypoints[csv_count].y << "\n";
+    ++csv_count;
 }
 
 int main(int argc, char** argv)
