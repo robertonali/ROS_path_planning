@@ -7,15 +7,20 @@ from nav_msgs.msg import Odometry
 from collections import defaultdict
 from tf import transformations
 import math
+import pandas as pd
 
 class WallFollower(object):
     def __init__(self):
+        self.segs=0
+        self.waypoints_x = []
+        self.waypoints_y = []
+        
         self.acker_msg = AckermannDriveStamped()
         self.regions = defaultdict(lambda:float)
         self.gains = {
             'Kp': 1.0,
             'Ki': 0.0025,
-            'Kd': 0.0005
+            'Kd': 0.0005,
         }
         self.max_steering = 1
         self.setpoint = 2.0
@@ -58,20 +63,6 @@ class WallFollower(object):
         # self.acker_msg.drive.jerk = jerk
     
     def takeAction(self):
-        # steering = 0.0
-        # self.read_sensor = 'DER'
-        # if self.regions[self.read_sensor] > 1.0:
-        #     self.pa_donde='acercar'
-        #     steering = -0.05
-        # elif self.regions[self.read_sensor] < 1.0:
-        #     self.pa_donde='alejar'
-        #     steering = 0.05
-        # elif self.regions[self.read_sensor] == 1.0:
-        #     self.pa_donde='frente'
-        #     steering = 0.0
-        # else:
-        #     self.pa_donde='npi'
-        
         self.calcControl()
         if self.regions['FRONT'] <= 0.2:
             self.vel= -5.0
@@ -103,28 +94,25 @@ class WallFollower(object):
 
         self.error[1] = self.error[0]
 
-
-    # def main(self):
-    #     pass
-    #     rospy.init_node("ros_wall_follower_node")
-    #     self.sub_laser = rospy.Subscriber("/scan", LaserScan, self.laserCallback)
-    #     self.pub_drive = rospy.Publisher('/drive', AckermannDriveStamped , queue_size=10)
-    #     self.rate = rospy.Rate(10) # 10hz
-    #     while not rospy.is_shutdown():
-    #         self.takeAction()
-    #         rospy.loginfo("{}, {}, {}".format(self.pa_donde, self.acker_msg.drive.steering_angle, self.acker_msg.drive.speed))
-    #         self.pub_drive.publish(self.acker_msg)
-    #         self.rate.sleep()
-
     def timerCallback(self, event):
         self.takeAction()
-        rospy.loginfo("x:{}, y:{}, ".format(self.x,self.y))
-        rospy.loginfo("{}, {}, {}, {}, {}".format(self.pa_donde, self.acker_msg.drive.steering_angle, self.acker_msg.drive.speed, self.regions['DER'],self.regions['FRONT']))
+        #rospy.loginfo("x:{}, y:{}, ".format(self.x,self.y))
+        rospy.loginfo("waypoints:{},{} ".format(self.waypoints_x,self.waypoints_y))
+        rospy.loginfo("{}, {}, {}, {},".format(self.acker_msg.drive.steering_angle, self.acker_msg.drive.speed, self.regions['IZQ'],self.regions['FRONT']))
+        self.wpdict ={"x":self.waypoints_x,"y":self.waypoints_y}
         self.pub_drive.publish(self.acker_msg)
+        self.segs = self.segs+1
+        if self.segs == 20:
+            self.waypoints_x.append(self.x)
+            self.waypoints_y.append(self.y)
+            self.segs=0
+        DataOutput = pd.DataFrame(self.wpdict)
+        DataOutput.to_csv("ros_wall_follower/scripts/coords.csv" , index=False)
+
+
 
 
 if __name__ == "__main__":
     robot = WallFollower()
     # robot.main()
     rospy.spin()
-    
