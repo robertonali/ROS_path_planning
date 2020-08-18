@@ -85,8 +85,8 @@ public:
     float32_t         car_speed;
     const ranges_index_s    scan_points[NUM_REGIONS] =
     {
-        {230, 260}, // 0 - DER
-        {261, 420}, // 1 - FR_DER
+        {230, 250}, // 0 - DER
+        {251, 420}, // 1 - FR_DER
         {421, 660}, // 2 - FRONT
         {661, 784}, // 1 - FR_DER
         {785, 1079} // 4 - IZQ
