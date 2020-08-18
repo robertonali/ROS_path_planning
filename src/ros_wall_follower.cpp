@@ -8,7 +8,6 @@
 
 #define FLOAT32_ARRAY_SIZE(x) sizeof(x)/sizeof(float)
 #define MAX_SCAN_POINTS 1080
-#define NUM_REGIONS 5
 #define MAX_RANGE 30 // [m]
 
 #define DER 0
@@ -16,6 +15,9 @@
 #define FRONT 2
 #define FR_IZQ 3
 #define IZQ 4
+#define NUM_REGIONS 5
+
+#define CSV_RATE 1 // [s]
 
 // using namespace std;
 using sensor_msgs::LaserScan;
@@ -66,18 +68,19 @@ typedef struct odom_coord_S
 class WallFollower
 {
 private:
-    ros::Timer            _timer;
+    ros::Timer            _timer0;
+    ros::Timer            _timer1;
     ros::Publisher        _drive_pub;
     ros::Subscriber       _laser_sub;
     ros::Subscriber       _odom_sub;
     LaserScan             _laser;
     AckermannDriveStamped _car;
     Odometry              _odom;
-    uint                  _timer_count;
 
     void _scanCallback(const sensor_msgs::LaserScan &msg);
     void _odomCallback(const nav_msgs::Odometry &msg);
-    void _timerCallback(const ros::TimerEvent &event);
+    void _timer0Callback(const ros::TimerEvent &event);
+    void _timer1Callback(const ros::TimerEvent &event);
 
 public:
     WallFollower(int argc, char** argv);
@@ -131,12 +134,11 @@ WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car
         };
     csv_count     = 0;
     car_speed     = 2.0;
-    _timer_count  = 10;
     _drive_pub    = nh.advertise<AckermannDriveStamped>("drive", 10);
     _laser_sub    = nh.subscribe("scan", 10, &WallFollower::_scanCallback, this);
     _odom_sub     = nh.subscribe("odom", 10, &WallFollower::_odomCallback, this);
-    _timer        = nh.createTimer(ros::Duration(control.dt), &WallFollower::_timerCallback, this);
-    
+    _timer0       = nh.createTimer(ros::Duration(control.dt), &WallFollower::_timer0Callback, this);
+    _timer1 = nh.createTimer(ros::Duration(CSV_RATE), &WallFollower::_timer1Callback, this);
     fout.open("odom_data.csv", std::ios::out);
 }
 
@@ -153,25 +155,24 @@ void WallFollower::_scanCallback(const sensor_msgs::LaserScan &msg)
     getScanRanges();
 }
 
-void WallFollower::_timerCallback(const ros::TimerEvent &event)
+void WallFollower::_timer0Callback(const ros::TimerEvent &event)
 {
     // ROS_INFO("Time elapsed: %f", event.last_real.now().toSec());
     takeAction();
-    ++_timer_count;
+}
+
+void WallFollower::_timer1Callback(const ros::TimerEvent &event)
+{
+    odom_coord_s coord;
+    coord.x = _odom.pose.pose.position.x;
+    coord.y = _odom.pose.pose.position.y;
+    waypoints.push_back(coord);
+    outputCSV();
 }
 
 void WallFollower::_odomCallback(const nav_msgs::Odometry &msg)
 {
     _odom = msg;
-    if(_timer_count >= 10)
-    {
-        odom_coord_s coord;
-        coord.x = _odom.pose.pose.position.x;
-        coord.y = _odom.pose.pose.position.y;
-        waypoints.push_back(coord);
-        _timer_count = 0;
-        outputCSV();
-    }
 }
 
 void WallFollower::getScanRanges(void)
@@ -201,7 +202,7 @@ void WallFollower::calculateControl(void)
     float32_t Ud = control.gains.Kd * (1 / control.dt) * (control.error[0] - control.error[1]);
     float32_t U  = Up + Ui + Ud;
     
-    steer.output = (((steer.max_value) / (control.gains.Kp * 3)) * U);
+    steer.output = (((steer.max_value) / (control.gains.Kp * 2)) * U);
 
     int sign = steer.output >= 0 ? 1 : -1;
 
