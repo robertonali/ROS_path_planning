@@ -10,19 +10,19 @@
 #define MAX_SCAN_POINTS 1080
 #define MAX_RANGE 30 // [m]
 
-#define DER 0
-#define FR_DER 1
-#define FRONT 2
-#define FR_IZQ 3
-#define IZQ 4
-#define NUM_REGIONS 5
+// #define DER 0
+// #define FR_DER 1
+// #define FRONT 2
+// #define FR_IZQ 3
+// #define IZQ 4
+// #define NUM_REGIONS 5
 
 #define RIGHT 0
 #define LEFT 1
 #define CENTER 2
 #define CONTROL CENTER
 
-#define CSV_RATE 1 // [s]
+#define CSV_RATE 0.1f // [s]
 
 // using namespace std;
 using sensor_msgs::LaserScan;
@@ -31,6 +31,16 @@ using ackermann_msgs::AckermannDriveStamped;
 
 typedef float float32_t;
 typedef double float64_t;
+
+typedef enum regions_E
+{
+    DER = 0,
+    FR_DER,
+    FRONT,
+    FR_IZQ,
+    IZQ,
+    NUM_REGIONS   
+}regions_e;
 
 typedef struct laser_read_S
 {   
@@ -123,13 +133,13 @@ WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car
     ros::NodeHandle nh;
     control =
         {
-            dt       : 0.1,
+            dt       : 0.01,
             setpoint : 1.5,
             error    : {0.0, 0.0},
             gains    : {
                 1.0,    // Kp
-                0.0025, // Ki
-                0.005   // Kd
+                0.05, // Ki
+                0.01   // Kd
                 }
         };
     steer =
@@ -209,7 +219,7 @@ void WallFollower::calculateControl(void)
     control.error[0] = control.setpoint - laser_read.min_ranges[DER];
 #endif
     float32_t Up = control.gains.Kp * control.error[0];
-    float32_t Ui = control.gains.Ki * (control.error[0] - control.error[1]) / 2;
+    float32_t Ui = control.gains.Ki * control.dt * (control.error[0] - control.error[1]) / 2;
     float32_t Ud = control.gains.Kd * (1 / control.dt) * (control.error[0] - control.error[1]);
     float32_t U  = Up + Ui + Ud;
     
