@@ -24,7 +24,7 @@ class WallFollower(object):
         }
         self.max_steering = 1
         self.setpoint = 2.0
-        self.dt = 0.1
+        self.dt = 0.01
         self.error = [0.0, 0.0]
         self.u = 0.0
         self.steering_output = 0.0
@@ -101,7 +101,7 @@ class WallFollower(object):
         
         self.wpdict ={"x": self.waypoints_x,"y": self.waypoints_y}
         self.segs = self.segs + 1
-        if self.segs == 20:
+        if self.segs == 10:
             self.waypoints_x.append(self.x)
             self.waypoints_y.append(self.y)
             self.segs=0
