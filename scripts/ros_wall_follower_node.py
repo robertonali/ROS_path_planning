@@ -118,7 +118,7 @@ class WallFollower(object):
         self.pub_drive.publish(self.acker_msg)
         self.wpdict ={"x": self.waypoints_x,"y": self.waypoints_y}
         self.segs = self.segs + 1
-        if self.segs == 20:
+        if self.segs == 20.0:
             self.waypoints_x.append(self.x)
             self.waypoints_y.append(self.y)
             self.segs=0
