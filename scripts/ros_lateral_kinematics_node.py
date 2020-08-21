@@ -8,7 +8,6 @@ from tf import transformations
 import math
 import pandas as pd
 
-df=pd.read_csv("coords100ms.csv"sep=',')
 class WallFollower(object):
     def __init__(self):
         self.acker_msg = AckermannDriveStamped()
@@ -19,13 +18,29 @@ class WallFollower(object):
             'Kd': 0.0005,#0.0005,
         }
         self.sub_laser = rospy.Subscriber("/scan", LaserScan, self.laserCallback, queue_size=1)
-        self.max_steering = 1
+        self.max_steering = 1.22
         self.setpoint = 0.0
         self.dt = 0.01
         self.error = [0.0, 0.0]
         self.u = 0.0
         self.steering_output = 0.0
-        self.vel = 2.0
+        self.vel = 1.0
+
+        self.track = 28
+        self.wbase = 40
+        self.waypoints = pd.read_csv("./coords100ms.csv", sep=',')
+        self.wp_size = self.waypoints.size
+        self.wp_index = 0
+        self.yaw = 0.0
+        self.ld = 0.0
+        self.x = 0.0
+        self.y = 0.0
+        self.x2 = 0.0
+        self.y2 = 0.0
+        self.gama = 0.0
+        self.alpha = 0.0
+        self.delta = 0.0
+        self.bucio = True
 
         rospy.init_node("ros_lateral_kinematics_node")
         self.pub_drive = rospy.Publisher("/drive", AckermannDriveStamped, queue_size=1)
@@ -39,23 +54,16 @@ class WallFollower(object):
             msg.pose.pose.orientation.x,
             msg.pose.pose.orientation.y,
             msg.pose.pose.orientation.z,
-            msg.pose.pose.orientation.w)
+            msg.pose.pose.orientation.w
+            )
         euler = transformations.euler_from_quaternion(quaternion)
-        self.yaw_ = euler[2]
+        self.yaw = euler[2]
 
     def laserCallback(self, msg):
         self.regions = {
             'DER'   : min(min(msg.ranges[138:539]), 30),
             'IZQ'   : min(min(msg.ranges[541:940]), 30),
         }
-        self.area=0.0
-        self.moment=0.0
-        self.centroid=0.0
-        for i in range(140,940):
-            self.area = self.area+(msg.ranges[i]*.25)
-            self.moment = self.moment+(i*msg.ranges[i]*.25)
-        self.centroid=self.moment/self.area
-
 
     def setCarMovement(self, steering_angle, steering_angle_velocity, speed,
                         acceleration, jerk):
@@ -66,7 +74,30 @@ class WallFollower(object):
         # self.acker_msg.drive.jerk = jerk
     
     def takeAction(self):
-        self.calcControl()
+        self.x2 = self.x - ((self.wbase / 2) * math.cos(self.yaw))
+        self.y2 = self.y - ((self.wbase / 2) * math.sin(self.yaw))
+        if (self.bucio):
+            rospy.loginfo_once(self.x)
+            rospy.loginfo_once(self.y)
+
+            rospy.loginfo_once(self.x2)
+            rospy.loginfo_once(self.y2)
+            self.ld = math.sqrt((self.waypoints['x'][self.wp_index] - self.x2) ** 2 + ((self.waypoints['y'][self.wp_index] - self.y2) ** 2))
+            rospy.loginfo_once(self.ld)
+
+            self.gama = math.atan2((self.waypoints['x'][self.wp_index] - self.x2), (self.waypoints['y'][self.wp_index] - self.y2))
+            self.alpha = self.gama - self.yaw
+
+            self.delta = math.atan2((2 * self.wbase * math.sin(self.alpha)), (self.ld))
+            self.bucio = False
+        else:
+            if ((abs(self.waypoints['x'][self.wp_index] - self.x2) <= 0.1) and (abs(self.waypoints['y'][self.wp_index] - self.y2) <= 0.1)):
+                self.bucio = True
+                self.wp_index += 1
+
+        # self.calcControl()
+        self.steering_output = self.delta
+        rospy.loginfo("Steer: {}, ".format(self.steering_output))
         self.setCarMovement(self.steering_output, 0.08, self.vel, 0.0, 0.0)
 
     def calcControl(self):
@@ -88,16 +119,7 @@ class WallFollower(object):
     def timerCallback(self, event):
         self.takeAction()
         self.pub_drive.publish(self.acker_msg)
-        self.wpdict ={"x": self.waypoints_x,"y": self.waypoints_y}
-        self.segs = self.segs + 1
-        if self.segs == 20.0:
-            self.waypoints_x.append(self.x)
-            self.waypoints_y.append(self.y)
-            self.segs=0
-        DataOutput = pd.DataFrame(self.wpdict)
-        DataOutput.to_csv("ros_wall_follower/scripts/coords.csv" , index=False)
        
-
 
 if __name__ == "__main__":
     robot = WallFollower()
