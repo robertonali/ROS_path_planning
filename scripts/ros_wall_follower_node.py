@@ -35,6 +35,7 @@ class WallFollower(object):
         self.steering_output = 0.0
         self.vel = 2.0
         self.control_side = "LEFT" # "LEFT" or "CENTER"
+        self.errorp=[0.0, 0.0]
 
         rospy.init_node("ros_wall_follower_node")
         #self.sub_laser = rospy.Subscriber("/scan", LaserScan, self.laserCallback, queue_size=1)
@@ -119,11 +120,14 @@ class WallFollower(object):
         self.wpdict ={"x": self.waypoints_x,"y": self.waypoints_y}
         self.segs = self.segs + 1
         if self.segs == 20.0:
-            self.waypoints_x.append(self.x)
-            self.waypoints_y.append(self.y)
+            self.errorp[1]=self.x
+            if (0.2 <=abs(self.errorp[1]-self.errorp[0])):
+                self.waypoints_x.append(self.x)
+                self.waypoints_y.append(self.y)
             self.segs=0
+            self.errorp[0]=self.errorp[1]
         DataOutput = pd.DataFrame(self.wpdict)
-        DataOutput.to_csv("ros_wall_follower/scripts/coords.csv" , index=False)
+        DataOutput.to_csv("coords.csv" , index=False)
         rospy.loginfo(self.z1)
         #rospy.loginfo(self.z2)
         # rospy.loginfo("waypoints:{},{} ".format(self.waypoints_x,self.waypoints_y))

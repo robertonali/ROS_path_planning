@@ -26,9 +26,9 @@ class WallFollower(object):
         self.steering_output = 0.0
         self.vel = 1.0
 
-        self.track = 28
-        self.wbase = 40
-        self.waypoints = pd.read_csv("./coords100ms.csv", sep=',')
+        self.track = .28
+        self.wbase = .40
+        self.waypoints = pd.read_csv("./coords.csv", sep=',')
         self.wp_size = self.waypoints.size
         self.wp_index = 0
         self.yaw = 0.0
@@ -76,25 +76,31 @@ class WallFollower(object):
     def takeAction(self):
         self.x2 = self.x - ((self.wbase / 2) * math.cos(self.yaw))
         self.y2 = self.y - ((self.wbase / 2) * math.sin(self.yaw))
+        rospy.loginfo("x2:{}".format(self.x2))
+        rospy.loginfo("y2:{}".format(self.x2))
         if (self.bucio):
-            rospy.loginfo_once(self.x)
-            rospy.loginfo_once(self.y)
+            rospy.loginfo(self.x)
+            rospy.loginfo(self.y)
 
-            rospy.loginfo_once(self.x2)
-            rospy.loginfo_once(self.y2)
+            rospy.loginfo(self.x2)
+            rospy.loginfo(self.y2)
             self.ld = math.sqrt((self.waypoints['x'][self.wp_index] - self.x2) ** 2 + ((self.waypoints['y'][self.wp_index] - self.y2) ** 2))
-            rospy.loginfo_once(self.ld)
-
-            self.gama = math.atan2((self.waypoints['x'][self.wp_index] - self.x2), (self.waypoints['y'][self.wp_index] - self.y2))
+            rospy.loginfo(self.ld)
+            rospy.loginfo(self.yaw)
+            self.gama = math.atan2((self.waypoints['y'][self.wp_index] - self.y2), (self.waypoints['x'][self.wp_index] - self.x2))
+            rospy.loginfo(self.gama)
             self.alpha = self.gama - self.yaw
-
+            rospy.loginfo(self.alpha)
             self.delta = math.atan2((2 * self.wbase * math.sin(self.alpha)), (self.ld))
+            rospy.loginfo(self.delta)
             self.bucio = False
         else:
-            if ((abs(self.waypoints['x'][self.wp_index] - self.x2) <= 0.1) and (abs(self.waypoints['y'][self.wp_index] - self.y2) <= 0.1)):
+            if (0.05>=math.sqrt((self.waypoints['x'][self.wp_index] - self.x2) ** 2 + ((self.waypoints['y'][self.wp_index] - self.y2) ** 2))) :
                 self.bucio = True
                 self.wp_index += 1
-
+            else:
+                self.bucio = False
+        rospy.loginfo(self.bucio)
         # self.calcControl()
         self.steering_output = self.delta
         rospy.loginfo("Steer: {}, ".format(self.steering_output))
