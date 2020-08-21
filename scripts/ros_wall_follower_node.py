@@ -11,6 +11,8 @@ import pandas as pd
 
 class WallFollower(object):
     def __init__(self):
+        self.z1=0.0
+        self.z2=0.0
         self.segs=0
         self.waypoints_x = []
         self.waypoints_y = []
@@ -20,7 +22,7 @@ class WallFollower(object):
         self.acker_msg = AckermannDriveStamped()
         self.regions = defaultdict(lambda:float)
         self.gains = {
-            'Kp': 1.2,#1.0,
+            'Kp': 1.1,#1.0,
             'Ki': 0.0025,#0.0025,
             'Kd': 0.0005,#0.0005,
         }
@@ -43,6 +45,8 @@ class WallFollower(object):
     def odomCallback(self, msg):
         self.x = msg.pose.pose.position.x
         self.y = msg.pose.pose.position.y
+        self.z1 = msg.twist.twist.angular.z
+        self.z2 = msg.pose.pose.orientation.z
             
     def laserCallback(self, msg):
         self.regions = {
@@ -59,7 +63,7 @@ class WallFollower(object):
             self.area = self.area+(msg.ranges[i]*.25)
             self.moment = self.moment+(i*msg.ranges[i]*.25)
         self.centroid=self.moment/self.area
-        rospy.loginfo(self.centroid)
+        #rospy.loginfo(self.centroid)
 
 
     def setCarMovement(self, steering_angle, steering_angle_velocity, speed,
@@ -120,15 +124,17 @@ class WallFollower(object):
             self.segs=0
         DataOutput = pd.DataFrame(self.wpdict)
         DataOutput.to_csv("ros_wall_follower/scripts/coords.csv" , index=False)
+        rospy.loginfo(self.z1)
+        #rospy.loginfo(self.z2)
         # rospy.loginfo("waypoints:{},{} ".format(self.waypoints_x,self.waypoints_y))
         # rospy.loginfo("{}, {}, {}, {},".format(self.acker_msg.drive.steering_angle, self.acker_msg.drive.speed, self.regions['IZQ'],self.regions['FRONT']))
 
-        if (self.control_side == "RIGHT"):
-            rospy.loginfo("DER: {}, Giro: {}, Error: {}".format(self.regions['DER'], self.acker_msg.drive.steering_angle, self.error[0]))
-        elif (self.control_side == "LEFT"):
-            rospy.loginfo("IZQ: {}, Giro: {}, Error: {}".format(self.regions['IZQ'], self.acker_msg.drive.steering_angle, self.error[0]))
-        else:
-            rospy.loginfo("DER: {}, IZQ:{}, Giro: {}, Error: {}".format(self.regions['DER'], self.regions['IZQ'], self.acker_msg.drive.steering_angle, self.error[0]))
+        # if (self.control_side == "RIGHT"):
+        #     rospy.loginfo("DER: {}, Giro: {}, Error: {}".format(self.regions['DER'], self.acker_msg.drive.steering_angle, self.error[0]))
+        # elif (self.control_side == "LEFT"):
+        #     rospy.loginfo("IZQ: {}, Giro: {}, Error: {}".format(self.regions['IZQ'], self.acker_msg.drive.steering_angle, self.error[0]))
+        # else:
+        #     rospy.loginfo("DER: {}, IZQ:{}, Giro: {}, Error: {}".format(self.regions['DER'], self.regions['IZQ'], self.acker_msg.drive.steering_angle, self.error[0]))
 
 
 if __name__ == "__main__":
