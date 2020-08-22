@@ -24,11 +24,11 @@ class WallFollower(object):
         self.error = [0.0, 0.0]
         self.u = 0.0
         self.steering_output = 0.0
-        self.vel = 1.0
+        self.vel = 2.0
 
         self.track = .28
         self.wbase = .40
-        self.waypoints = pd.read_csv("./coords.csv", sep=',')
+        self.waypoints = pd.read_csv("./coords_mamado_300ms.csv", sep=',')
         self.wp_size = self.waypoints.size
         self.wp_index = 0
         self.yaw = 0.0
@@ -42,7 +42,7 @@ class WallFollower(object):
         self.delta = 0.0
         self.bucio = True
 
-        rospy.init_node("ros_lateral_kinematics_node")
+        rospy.init_node('dummy_agent')
         self.pub_drive = rospy.Publisher("/drive", AckermannDriveStamped, queue_size=1)
         self.odom_= rospy.Subscriber("/odom", Odometry,self.odomCallback,queue_size=1)
         rospy.Timer(rospy.Duration(self.dt), self.timerCallback)
@@ -95,7 +95,7 @@ class WallFollower(object):
             rospy.loginfo(self.delta)
             self.bucio = False
         else:
-            if (0.05>=math.sqrt((self.waypoints['x'][self.wp_index] - self.x2) ** 2 + ((self.waypoints['y'][self.wp_index] - self.y2) ** 2))) :
+            if (0.15>=math.sqrt((self.waypoints['x'][self.wp_index] - self.x2) ** 2 + ((self.waypoints['y'][self.wp_index] - self.y2) ** 2))) :
                 self.bucio = True
                 self.wp_index += 1
             else:
@@ -104,7 +104,7 @@ class WallFollower(object):
         # self.calcControl()
         self.steering_output = self.delta
         rospy.loginfo("Steer: {}, ".format(self.steering_output))
-        self.setCarMovement(self.steering_output, 0.08, self.vel, 0.0, 0.0)
+        self.setCarMovement(self.steering_output, 0.00, self.vel, 0.0, 0.0)
 
     def calcControl(self):
         self.setpoint = 540 

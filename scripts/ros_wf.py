@@ -10,28 +10,27 @@ import math
 import pandas as pd
 import numpy as np
 
-class PID(object):
+class ePID_M(object):
     def __init__(self, kp, ki, kd):
         self.dt       = 0.01
         self.setpoint = 0
         self.gains    = {'Kp': kp, 'Ki': ki, 'Kd': kd}
         self.error    = [0.0, 0.0]
         self.U        = 0.0
+        self.steering_output = 0.0
     
     def calculateControl(self, centroid):
         self.setpoint = 0
         self.error[0] = centroid - self.setpoint #self.regions['IZQ']- self.regions['DER']
         Up = self.gains['Kp'] * self.error[0]
         Ui = self.gains['Ki'] * ((self.error[0] - self.error[1]) / 2) * self.dt
-        Ud = self.gains['Kd'] * (self.error[0] - self.error[1]) * (1 / self.dt)
+        Ud = self.gains['Kd'] * (self.error[0] - self.error[1])/ self.dt
 
         self.U = Up + Ui + Ud
 
         #self.steering_output = ((self.max_steering) / (self.gains['Kp'] * 270) * U)
         self.steering_output = min(max(-1., self.U),1)
-        rospy.loginfo("Control: {}, Steer:{} vel:{}, Centroid: {}".format(self.U,
-                            self.steering_output, self.current_vel['total'],
-                            self.centroid))
+        rospy.loginfo("Control: {}".format(self.U))
         # sign = 1 if (self.steering_output >= 0) else -1
         # self.steering_output = (sign * self.max_steering) if (abs(self.steering_output) >= self.max_steering) else self.steering_output
 
@@ -50,23 +49,22 @@ class Centroid(object):
         self.centroid              = 0.0
         self.normalized_centroid   = 0.0
 
-class WallFollower(PID, Odom, Centroid):
+class WallFollower(ePID_M, Odom, Centroid):
     def __init__(self):
         # self.pid = PID(1.0, 0.0, 0.0)
-        PID.__init__(self, 0.24, 0.0, 0.12)
+        ePID_M.__init__(self, 3, 0.0, 0.01)
 
         Centroid.__init__(self)
 
         Odom.__init__(self)
 
         self.max_steering    = 1.0
-        self.steering_output = 0.0
-        self.vel             = 2.0
+        self.vel             = 4.0
         self.acker_msg       = AckermannDriveStamped()
         self.regions         = defaultdict(lambda:float)
 
-        rospy.init_node("ros_wall_follower_node")
-
+        self.segs = 0.0
+        
         self.drive_pub = rospy.Publisher("/drive", AckermannDriveStamped, queue_size=1)
         self.laser_sub = rospy.Subscriber("/scan", LaserScan, self.laserCallback, queue_size=1)
         self.odom_sub  = rospy.Subscriber("/odom", Odometry, self.odomCallback, queue_size=1)
@@ -88,8 +86,25 @@ class WallFollower(PID, Odom, Centroid):
         #     'DER'   : np.array(msg.ranges[138:539]),
         #     'IZQ'   : np.array(msg.ranges[541:940])
         # }
-        self.centroid = np.divide(np.sum(np.multiply(msg.ranges, np.arange(1080))),
-                            np.sum(msg.ranges))
+
+
+        # self.centroid = np.divide(np.sum(np.multiply(msg.ranges, np.arange(1080))),
+        #                     np.sum(msg.ranges))
+
+        self.regions = {
+            'DER'   : min(min(msg.ranges[138:539]), 30),
+            # 'F_DER'  : min(min(msg.ranges[323:420]), 30),
+            # 'FRONT': min(min(msg.ranges[421:659]), 30),
+            # 'F_IZQ'  : min(min(msg.ranges[661:751]), 30),
+            'IZQ'   : min(min(msg.ranges[541:940]), 30),
+        }
+        self.area=0.0
+        self.moment=0.0
+        self.centroid=0.0
+        for i in range(140,940):
+            self.area = self.area+(msg.ranges[i]*.25)
+            self.moment = self.moment+(i*msg.ranges[i]*.25)
+        self.centroid=self.moment/self.area
         self.normalized_centroid = (self.centroid / 540) -1
         #rospy.loginfo(self.centroid)
 
@@ -102,9 +117,13 @@ class WallFollower(PID, Odom, Centroid):
         self.acker_msg.drive.speed = speed
         # self.acker_msg.drive.acceleration = acceleration
         # self.acker_msg.drive.jerk = jerk
+
+
+        self.drive_pub.publish(self.acker_msg)
     
     def takeAction(self):
-        self.calcControl()
+        pass
+        #self.calcControl()
         # if self.regions['FRONT'] <= 0.2:
         #     self.vel= -3.0
         #     signo = -1 if (self.steering_output >= 0) else 1
@@ -143,21 +162,19 @@ class WallFollower(PID, Odom, Centroid):
         # # self.steering_output = (sign * self.max_steering) if (abs(self.steering_output) >= self.max_steering) else self.steering_output
 
         # self.error[1] = self.error[0]
-    def timerCallback(self, event):
+    def timerCallback(self, elapsed):
         # self.takeAction()
         self.calculateControl(self.normalized_centroid)
         self.setCarMovement(self.steering_output, 0.0, self.vel, 0.0, 0.0)
-        self.drive_pub.publish(self.acker_msg)
-        # self.wpdict ={"x": self.waypoints_x,"y": self.waypoints_y}
-        # self.segs = self.segs + 1
-
-        # DataOutput = pd.DataFrame(self.wpdict)
-        # DataOutput.to_csv("coords.csv" , index=False)
-        # rospy.loginfo(self.z1)
-        #rospy.loginfo(self.z2)
-        # rospy.loginfo("waypoints:{},{} ".format(self.waypoints_x,self.waypoints_y))
-        # rospy.loginfo("{}, {}, {}, {},".format(self.acker_msg.drive.steering_angle, self.acker_msg.drive.speed, self.regions['IZQ'],self.regions['FRONT']))
-
+        self.wpdict ={"x": self.waypoints_x,"y": self.waypoints_y}
+        self.segs = self.segs + 1
+        if self.segs == 30.0:
+            self.waypoints_x.append(self.current_pos['x'])
+            self.waypoints_y.append(self.current_pos['y'])
+            self.segs=0
+        DataOutput = pd.DataFrame(self.wpdict)
+        DataOutput.to_csv("ros_wall_follower/scripts/coords_mamado.csv" , index=False)
+   
         # if (self.control_side == "RIGHT"):
         #     rospy.loginfo("DER: {}, Giro: {}, Error: {}".format(self.regions['DER'], self.acker_msg.drive.steering_angle, self.error[0]))
         # elif (self.control_side == "LEFT"):
@@ -167,6 +184,7 @@ class WallFollower(PID, Odom, Centroid):
 
 
 if __name__ == "__main__":
+    rospy.init_node("dummy_agent")
     robot = WallFollower()
     # robot.main()
     rospy.spin()
