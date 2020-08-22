@@ -33,24 +33,28 @@ class PID(object):
         self.error[1] = self.error[0]
         return min(max(-1.0, self.U), 1.0)
 
+class Orientation(object):
+        def __init__(self):
+            self.quaternion = list()
+            self.euler      = defaultdict(lambda: float)
 class Odom(object):
     def __init__(self):
-        self.waypoints_x = list()
-        self.waypoints_y = list()
-        self.wpdict      = {'x': list(), 'y': list()}
+        # self.waypoints_x = list()
+        # self.waypoints_y = list()
+        self.waypoints   = list()
         self.current_pos = {'x': 0.0, 'y': 0.0}
         self.prev_pos    = {'x': 0.0, 'y': 0.0}
-        self.current_vel = {'x': 0.0, 'y': 0.0,
-                'total': 0.0}
+        self.current_vel = {'x': 0.0, 'y': 0.0, 'total': 0.0}
+        self.orientation = Orientation() 
         self.track       = 0.28
         self.wheelbase   = 0.40
 
 class Centroid(object):
     def __init__(self):
-        self.centroid              = 0.0
+        self.centroid             = 0.0
+        self.normalized_centroid  = 0.0
         # self.moment                = 0.0
         # self.area                  = 0.0
-        self.normalized_centroid   = 0.0
 
 class WallFollower(PID, Odom, Centroid):
     def __init__(self):
@@ -84,6 +88,11 @@ class WallFollower(PID, Odom, Centroid):
         self.current_vel['x'] = msg.twist.twist.linear.x
         self.current_vel['y'] = msg.twist.twist.linear.y
         self.current_vel['total'] = np.hypot(self.current_vel['x'], self.current_vel['y'])
+        
+        self.orientation.quaternion = [msg.pose.pose.orientation.x, msg.pose.pose.orientation.y,
+                                        msg.pose.pose.orientation.z, msg.pose.pose.orientation.w]
+        (self.orientation.euler['roll'], self.orientation.euler['roll'],
+            self.orientation.euler['yaw']) = transformations.euler_from_quaternion(self.orientation.quaternion)
         # self.z1 = msg.twist.twist.angular.z
         # self.z2 = msg.pose.pose.orientation.z
             
@@ -100,7 +109,7 @@ class WallFollower(PID, Odom, Centroid):
         self.centroid = np.divide(np.sum(np.multiply(msg.ranges[140:940], np.arange(140, 940))),
                     np.sum(msg.ranges[140:940]))
         self.normalized_centroid = ((self.centroid / 400) - 1.35)
-        rospy.loginfo(self.normalized_centroid)
+        # rospy.loginfo(self.normalized_centroid)
 
 
     def setCarMovement(self, steering_angle, steering_angle_velocity, speed,
@@ -180,14 +189,16 @@ class WallFollower(PID, Odom, Centroid):
                         self.error[0], self.current_vel['total'], self.centroid))
 
     def getWaypoints(self):
-        if (np.hypot((self.current_pos['x'] - self.prev_pos['x']), (self.current_pos['y'] - self.prev_pos['y']))) >= 0.2:
-            self.waypoints_x.append(self.current_pos['x'])             # list appending x data
-            self.waypoints_y.append(self.current_pos['y'])             # list appending y data
-            self.prev_pos['x'] = self.current_pos['x']                 # change value of prev x on dict
-            self.prev_pos['y'] = self.current_pos['y']                 # change value of prev y on dict
-            self.wpdict ={"x": self.waypoints_x,"y": self.waypoints_y} # dictionary of lists 'x', 'y'
-            DataOutput = pd.DataFrame(self.wpdict)
-            DataOutput.to_csv("./ros_wall_follower/scripts/coords_mamado_ultimo.csv" , index=False)
+        if ( (np.hypot((self.current_pos['x'] - self.prev_pos['x']),
+                        (self.current_pos['y'] - self.prev_pos['y']))) >= (self.wheelbase * 0.8) ):
+            self.prev_pos['x'] = self.current_pos['x']                          # Change value of prev x on dict
+            self.prev_pos['y'] = self.current_pos['y']                          # Change value of prev y on dict
+            waypoint_x2 = self.current_pos['x'] + ((self.wheelbase / 2) * np.cos(self.orientation.euler['yaw'])) # Get waypoint to the rear x axis
+            waypoint_y2 = self.current_pos['y'] + ((self.wheelbase / 2) * np.sin(self.orientation.euler['yaw'])) # Get waypoint to the rear y axis
+            self.waypoints.append( [waypoint_x2, waypoint_y2,
+                                    self.current_vel['total']] )                # List appending x data
+            np.savetxt('./ros_wall_follower/scripts/odom_data.csv', self.waypoints, delimiter = ",")
+
 
 if __name__ == "__main__":
     robot = WallFollower()
