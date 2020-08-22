@@ -8,6 +8,7 @@ from collections import defaultdict
 from tf import transformations
 import math
 import pandas as pd
+import numpy as np
 
 class WallFollower(object):
     def __init__(self):
@@ -18,20 +19,26 @@ class WallFollower(object):
         self.waypoints_y = []
         self.area=0.0
         self.centroid=0.0
+        self.centroid2=0.0
         self.moment=0.0
         self.acker_msg = AckermannDriveStamped()
         self.regions = defaultdict(lambda:float)
         self.gains = {
-            'Kp': 1.1,#1.0,
-            'Ki': 0.0025,#0.0025,
-            'Kd': 0.0005,#0.0005,
+            'Kp': 10.0,#1.0,
+            'Ki': 0.0,#0.0025,
+            'Kd': 0.0,#0.0005,
         }
         self.sub_laser = rospy.Subscriber("/scan", LaserScan, self.laserCallback, queue_size=1)
         self.max_steering = 1
         self.setpoint = 0.0
         self.dt = 0.01
         self.error = [0.0, 0.0]
+        self.x=0.0
+        self.y=0.0
         self.u = 0.0
+        self.vx=0.0
+        self.vy=0.0
+        self.vt=0.0
         self.steering_output = 0.0
         self.vel = 2.0
         self.control_side = "LEFT" # "LEFT" or "CENTER"
@@ -46,6 +53,9 @@ class WallFollower(object):
     def odomCallback(self, msg):
         self.x = msg.pose.pose.position.x
         self.y = msg.pose.pose.position.y
+        self.vx = msg.twist.twist.linear.x
+        self.vy = msg.twist.twist.linear.y
+        self.vt =np.hypot(self.vx, self.vy)
         self.z1 = msg.twist.twist.angular.z
         self.z2 = msg.pose.pose.orientation.z
             
@@ -60,10 +70,14 @@ class WallFollower(object):
         self.area=0.0
         self.moment=0.0
         self.centroid=0.0
-        for i in range(140,940):
-            self.area = self.area+(msg.ranges[i]*.25)
-            self.moment = self.moment+(i*msg.ranges[i]*.25)
-        self.centroid=self.moment/self.area
+        # for i in range(140,940):
+        #     self.area = self.area+(msg.ranges[i]*.25)
+        #     self.moment = self.moment+(i*msg.ranges[i]*.25)
+        # self.centroid=self.moment/self.area
+        self.centroid=np.divide(np.sum(np.multiply(msg.ranges,np.arange(1080))),np.sum(msg.ranges))
+        
+        self.centroid2=(self.centroid/540) -1
+
         #rospy.loginfo(self.centroid)
 
 
@@ -71,7 +85,7 @@ class WallFollower(object):
                         acceleration, jerk):
         self.acker_msg.drive.speed = speed
         # self.acker_msg.drive.acceleration = acceleration
-        self.acker_msg.drive.steering_angle_velocity= steering_angle_velocity
+        #self.acker_msg.drive.steering_angle_velocity= steering_angle_velocity
         self.acker_msg.drive.steering_angle = steering_angle
         # self.acker_msg.drive.jerk = jerk
     
@@ -99,18 +113,19 @@ class WallFollower(object):
         # else:
         #     self.setpoint = (self.regions['DER'] + self.regions['IZQ'])/2
         #     self.error[0] = self.setpoint - self.regions['DER']
-        self.setpoint = 540 #(self.regions['DER'] + self.regions['IZQ'])/2
-        self.error[0] = self.centroid-self.setpoint #self.regions['IZQ']- self.regions['DER']
+        self.setpoint = 0 #(self.regions['DER'] + self.regions['IZQ'])/2
+        self.error[0] = self.centroid2-self.setpoint #self.regions['IZQ']- self.regions['DER']
         Up = self.gains['Kp'] * self.error[0]
         Ui = self.gains['Ki']*self.dt * (self.error[0] - self.error[1]) / 2
         Ud = self.gains['Kd'] * (1 / self.dt) * (self.error[0] - self.error[1])
 
         U = Up + Ui + Ud
 
-        self.steering_output = ((self.max_steering) / (self.gains['Kp'] * 270) * U)
-
-        sign = 1 if (self.steering_output >= 0) else -1
-        self.steering_output = (sign * self.max_steering) if (abs(self.steering_output) >= self.max_steering) else self.steering_output
+        #self.steering_output = ((self.max_steering) / (self.gains['Kp'] * 270) * U)
+        self.steering_output=min(max(-1.,U),1)
+        rospy.loginfo("Output:{} vel:,{}".format(self.steering_output,self.vt))
+        # sign = 1 if (self.steering_output >= 0) else -1
+        # self.steering_output = (sign * self.max_steering) if (abs(self.steering_output) >= self.max_steering) else self.steering_output
 
         self.error[1] = self.error[0]
 
