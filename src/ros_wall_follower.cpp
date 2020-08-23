@@ -10,9 +10,8 @@
 
 #define FLOAT32_ARRAY_SIZE(x) sizeof(x)/sizeof(float)
 #define MAX_SCAN_POINTS 1080
-#define MAX_RANGE 30 // [m]
-
-#define CSV_RATE 0.1f // [s]
+#define MAX_RANGE 30    // [m]
+#define CSV_RATE 0.1f   // [s] 
 
 #define QX odom.quaternion.x
 #define QY odom.quaternion.y
@@ -75,15 +74,17 @@ typedef struct quaternions_S
 
 typedef struct odom_coord_S
 {
-    float32_t x, y, magnitude;
+    float64_t x, y, magnitude;
 } odom_coord_s;
 
 typedef struct odom_data_S
 {
     odom_coord_s current_pos;
+    odom_coord_s prev_pos;      // Only needed when taking waypoint per distance.
     odom_coord_s current_vel;
     quaternions_s quaternion;
     float64_t euler[EULER_ANGLES];
+    std::vector<odom_coord_s> waypoints;
 } odom_data_s;
 
 /*
@@ -107,6 +108,12 @@ typedef struct steering_params_S
 {
     float32_t output, max_value;
 } steering_params_s;
+
+typedef struct car_S
+{
+    steering_params_s steer;
+    float32_t wheelbase, track, speed;
+} car_s;
 
 class WallFollower
 {
@@ -141,9 +148,8 @@ public:
     odom_data_s               odom;
     laser_read_s              laser;
     pid_control_s             control;
-    steering_params_s         steer;
+    car_s                     car;
     float32_t                 car_speed;
-    std::vector<odom_coord_s> waypoints;
     std::fstream              fout;
     unsigned int              csv_count;
     const ranges_index_s      scan_points[NUM_REGIONS] =
@@ -159,6 +165,8 @@ WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car
     std::string node_name = "dummy_agent";
     ros::init(argc, argv, node_name);
     ros::NodeHandle nh;
+    memset(&odom, 0, sizeof(odom));
+    memset(&laser, 0, sizeof(laser));
     control =
         {
             dt       : 0.01,
@@ -170,19 +178,23 @@ WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car
                 0.40    // Kd 0.0005
                 }
         };
-    steer =
+    car =
         {
-            output : 0.0,
-            max_value : 1.0
+            steer     : {
+                output    : 0.0,
+                max_value : 1.0
+            },
+            wheelbase : 0.40,
+            track     : 0.28,
+            speed     : 3.0
         };
     csv_count  = 0;
-    car_speed  = 3.0;
     _drive_pub = nh.advertise<AckermannDriveStamped>("drive", 1);
     _laser_sub = nh.subscribe("scan", 1, &WallFollower::_scanCallback, this);
     _odom_sub  = nh.subscribe("odom", 1, &WallFollower::_odomCallback, this);
     _timer0    = nh.createTimer(ros::Duration(control.dt), &WallFollower::_timer0Callback, this);
     // _timer1    = nh.createTimer(ros::Duration(CSV_RATE), &WallFollower::_timer1Callback, this);
-    fout.open("odom_data.csv", std::ios::out);
+    fout.open("./src/ros_wall_follower/src/odom_data.csv", std::ios::out);
 }
 
 WallFollower::~WallFollower()
@@ -211,7 +223,7 @@ void WallFollower::_timer1Callback(const ros::TimerEvent &event)
     odom_coord_s coord;
     coord.x = _odom.pose.pose.position.x;
     coord.y = _odom.pose.pose.position.y;
-    waypoints.push_back(coord);
+    odom.waypoints.push_back(coord);
     outputCSV();
 }
 
@@ -225,21 +237,21 @@ void WallFollower::_odomCallback(const nav_msgs::Odometry &msg)
     odom.current_vel.magnitude = hypot(odom.current_vel.x, odom.current_vel.y);
 
     // Method 1 
-    // quaternions_s orientation = {   // Not valid due to "quaternion_s" not member or WallFollower
     // struct {                        // Not valid due to unamed struct does not corresponds to quaternion_s when assigning
     //     float64_t x, y, z, w;
     // } orientation = {
-    //     x : _odom.pose.pose.orientation.x,
-    //     y : _odom.pose.pose.orientation.y,
-    //     z : _odom.pose.pose.orientation.z,
-    //     w : _odom.pose.pose.orientation.w,
-    // };
-    // odom.quaternion = orientation;
+    quaternions_s orientation = {
+        x : _odom.pose.pose.orientation.x,
+        y : _odom.pose.pose.orientation.y,
+        z : _odom.pose.pose.orientation.z,
+        w : _odom.pose.pose.orientation.w,
+    };
+    odom.quaternion = orientation;
 
     // Method 2
-    std::tie(odom.quaternion.x, odom.quaternion.y, odom.quaternion.z, odom.quaternion.w) \
-            = std::make_tuple(_odom.pose.pose.orientation.x, _odom.pose.pose.orientation.y, \
-                                _odom.pose.pose.orientation.z, _odom.pose.pose.orientation.w);
+    // std::tie(odom.quaternion.x, odom.quaternion.y, odom.quaternion.z, odom.quaternion.w) \
+    //         = std::make_tuple(_odom.pose.pose.orientation.x, _odom.pose.pose.orientation.y, \
+    //                             _odom.pose.pose.orientation.z, _odom.pose.pose.orientation.w);
 
     float64_t euler_from_quaternion[] = {
         atan2((2 * (QW * QX + QY * QZ)), (1 - 2 * (QX * QX + QY * QY))),
@@ -320,9 +332,10 @@ float32_t WallFollower::calculateControl(float32_t centroid)
 
 void WallFollower::takeAction(void)
 {
-    steer.output = calculateControl(laser.centroid.normalized);
-    setCarMovement(steer.output, 0.0, car_speed, 0.0, 0.0);
+    car.steer.output = calculateControl(laser.centroid.normalized);
+    setCarMovement(car.steer.output, 0.0, car.speed, 0.0, 0.0);
     publishAckermannMsg();
+    getWaypoints();
     // ROS_INFO("%f, %f, %f, %f", _car.drive.steering_angle, _car.drive.speed, \
     //             laser.min_ranges[DER], laser.min_ranges[FRONT]);
 
@@ -347,13 +360,23 @@ void WallFollower::publishAckermannMsg(void)
 
 void WallFollower::outputCSV(void)
 {
-    fout << waypoints[csv_count].x << "," << waypoints[csv_count].y << "\n";
+    fout << odom.waypoints[csv_count].x << "," << odom.waypoints[csv_count].y << "\n";
     ++csv_count;
 }
 
 void WallFollower::getWaypoints(void)
 {
-    
+    if (hypot((odom.current_pos.x - odom.prev_pos.x), (odom.current_pos.y - odom.prev_pos.y)) \
+                >= (car.wheelbase * 0.8))
+    {
+        odom_coord_s coord;
+        odom.prev_pos.x = odom.current_pos.x;
+        odom.prev_pos.y = odom.current_pos.y;
+        coord.x = odom.current_pos.x + ((car.wheelbase / 2) * cos(odom.euler[YAW]));
+        coord.y = odom.current_pos.y +((car.wheelbase / 2) * sin(odom.euler[YAW]));
+        odom.waypoints.push_back(coord);
+        outputCSV();
+    }
 
 }
 
