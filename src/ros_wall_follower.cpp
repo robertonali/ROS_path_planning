@@ -211,11 +211,11 @@ void WallFollower::getScanCentroid(void)
     laser_read.centroid.sum_x = 0.0;
 
     laser_read.range_iter = laser_read.ranges.begin();
-    advance(laser_read.range_iter, scan_points[DER].begin);
-    auto end_iter = next(laser_read.ranges.begin(), scan_points[IZQ].end);
+    std::vector<float32_t>::iterator start_iter = next(laser_read.ranges.begin(), scan_points[DER].begin);
+    auto end_iter                               = next(laser_read.ranges.begin(), scan_points[IZQ].end);
     
     int index = scan_points[DER].begin;
-    std::for_each(laser_read.range_iter, end_iter, [&] (int n)
+    std::for_each(start_iter, end_iter, [&] (int n)
     {
         laser_read.centroid.sum_moment += (index * n);
         laser_read.centroid.sum_x += n;
