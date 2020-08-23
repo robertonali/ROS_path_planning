@@ -3,9 +3,10 @@
 #include <ackermann_msgs/AckermannDriveStamped.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/LaserScan.h>
+#include <math.h>
 #include <fstream>
 #include <iostream>
-#include <math.h>
+#include <iterator>
 
 #define FLOAT32_ARRAY_SIZE(x) sizeof(x)/sizeof(float)
 #define MAX_SCAN_POINTS 1080
@@ -41,6 +42,7 @@ typedef struct laser_read_S
     float32_t angle_increment;
     float32_t min_ranges[5];
     std::vector<float32_t> ranges;
+    std::vector<float32_t>::iterator range_iter;
     centroid_s centroid;
 }laser_read_s;
 
@@ -207,16 +209,27 @@ void WallFollower::getScanCentroid(void)
 {
     laser_read.centroid.sum_moment = 0.0;
     laser_read.centroid.sum_x = 0.0;
-    // std::for_each(vector.begin(), vector.end(), [&] (int n) {
-    // sum_of_elems += n; });
-    for (int i = 0; i < NUM_REGIONS; i++)
+
+    laser_read.range_iter = laser_read.ranges.begin();
+    advance(laser_read.range_iter, scan_points[DER].begin);
+    auto end_iter = next(laser_read.ranges.begin(), scan_points[IZQ].end);
+    
+    int index = scan_points[DER].begin;
+    std::for_each(laser_read.range_iter, end_iter, [&] (int n)
     {
-        for (int j = scan_points[i].begin; j <= scan_points[i].end; j++)
-        {
-            laser_read.centroid.sum_moment += (j * laser_read.ranges[j]);
-            laser_read.centroid.sum_x += laser_read.ranges[j]; // x (in deg) * f(x) * dx
-        } 
+        laser_read.centroid.sum_moment += (index * n);
+        laser_read.centroid.sum_x += n;
+        ++index; 
     }
+    );
+    // for (int i = 0; i < NUM_REGIONS; i++)
+    // {
+    //     for (int j = scan_points[i].begin; j <= scan_points[i].end; j++)
+    //     {
+    //         laser_read.centroid.sum_moment += (j * laser_read.ranges[j]);
+    //         laser_read.centroid.sum_x += laser_read.ranges[j]; // x (in deg) * f(x) * dx
+    //     } 
+    // }
     laser_read.centroid.x = laser_read.centroid.sum_moment / laser_read.centroid.sum_x;
     // Normalize centroid
     laser_read.centroid.normalized = ((laser_read.centroid.x / 400) - 1.35);
