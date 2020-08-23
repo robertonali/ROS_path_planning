@@ -209,16 +209,16 @@ void WallFollower::getScanCentroid(void)
 {
     laser_read.centroid.sum_moment = 0.0;
     laser_read.centroid.sum_x = 0.0;
-
     laser_read.range_iter = laser_read.ranges.begin();
-    std::vector<float32_t>::iterator start_iter = next(laser_read.ranges.begin(), scan_points[DER].begin);
-    auto end_iter                               = next(laser_read.ranges.begin(), scan_points[IZQ].end);
-    
+    auto start_iter = next(laser_read.ranges.begin(), scan_points[DER].begin);
+    auto end_iter   = next(laser_read.ranges.begin(), scan_points[IZQ].end);
+
     int index = scan_points[DER].begin;
-    std::for_each(start_iter, end_iter, [&] (int n)
+    // [&] "Captures" external variables as reference into the lambda functions. Can pass [&index] alone, or any other variable
+    std::for_each(start_iter, end_iter, [&] (const float32_t value)
     {
-        laser_read.centroid.sum_moment += (index * n);
-        laser_read.centroid.sum_x += n;
+        laser_read.centroid.sum_moment += (index * value);
+        laser_read.centroid.sum_x += value;
         ++index; 
     }
     );
