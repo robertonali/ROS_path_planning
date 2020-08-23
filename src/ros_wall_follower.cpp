@@ -5,22 +5,11 @@
 #include <sensor_msgs/LaserScan.h>
 #include <fstream>
 #include <iostream>
+#include <math.h>
 
 #define FLOAT32_ARRAY_SIZE(x) sizeof(x)/sizeof(float)
 #define MAX_SCAN_POINTS 1080
 #define MAX_RANGE 30 // [m]
-
-// #define DER 0
-// #define FR_DER 1
-// #define FRONT 2
-// #define FR_IZQ 3
-// #define IZQ 4
-// #define NUM_REGIONS 5
-
-#define RIGHT 0
-#define LEFT 1
-#define CENTER 2
-#define CONTROL CENTER
 
 #define CSV_RATE 0.1f // [s]
 
@@ -41,8 +30,10 @@ typedef enum regions_E
 
 typedef struct centroid_S
 {
-    float32_t area;
+    float32_t sum_moment;
+    float32_t sum_x;
     float32_t x;
+    float32_t normalized;
 }centroid_s;
 
 typedef struct laser_read_S
@@ -108,7 +99,7 @@ public:
                                     float32_t speed, float32_t acceleration, float32_t jerk);
     void getScanRanges(void);
     void getScanCentroid(void);
-    void calculateControl(void);
+    float32_t calculateControl(float32_t);
     void takeAction(void);
     void publishAckermannMsg(void);
     void outputCSV(void);
@@ -130,7 +121,7 @@ public:
 
 WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car(), _odom()
 {
-    std::string node_name = "ros_wall_follower";
+    std::string node_name = "dummy_agent";
     ros::init(argc, argv, node_name);
     ros::NodeHandle nh;
     control =
@@ -139,9 +130,9 @@ WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car
             setpoint : 1.5,
             error    : {0.0, 0.0},
             gains    : {
-                1.2,    // Kp 1.2
-                0.1,   // Ki 0.0025
-                0.05    // Kd 0.0005
+                1.70,   // Kp 1.2
+                0.00,   // Ki 0.0025
+                0.40    // Kd 0.0005
                 }
         };
     steer =
@@ -150,12 +141,12 @@ WallFollower::WallFollower(int argc, char** argv) : _drive_pub(), _laser(), _car
             max_value : 1.0
         };
     csv_count  = 0;
-    car_speed  = 1.7;
-    _drive_pub = nh.advertise<AckermannDriveStamped>("drive", 10);
-    _laser_sub = nh.subscribe("scan", 10, &WallFollower::_scanCallback, this);
-    _odom_sub  = nh.subscribe("odom", 10, &WallFollower::_odomCallback, this);
+    car_speed  = 3.0;
+    _drive_pub = nh.advertise<AckermannDriveStamped>("drive", 1);
+    _laser_sub = nh.subscribe("scan", 1, &WallFollower::_scanCallback, this);
+    _odom_sub  = nh.subscribe("odom", 1, &WallFollower::_odomCallback, this);
     _timer0    = nh.createTimer(ros::Duration(control.dt), &WallFollower::_timer0Callback, this);
-    _timer1    = nh.createTimer(ros::Duration(CSV_RATE), &WallFollower::_timer1Callback, this);
+    // _timer1    = nh.createTimer(ros::Duration(CSV_RATE), &WallFollower::_timer1Callback, this);
     fout.open("odom_data.csv", std::ios::out);
 }
 
@@ -214,81 +205,56 @@ void WallFollower::getScanRanges(void)
 
 void WallFollower::getScanCentroid(void)
 {
-    laser_read.centroid.area = 0.0;
-    laser_read.centroid.x = 0.0;
+    laser_read.centroid.sum_moment = 0.0;
+    laser_read.centroid.sum_x = 0.0;
+    // std::for_each(vector.begin(), vector.end(), [&] (int n) {
+    // sum_of_elems += n; });
     for (int i = 0; i < NUM_REGIONS; i++)
     {
         for (int j = scan_points[i].begin; j <= scan_points[i].end; j++)
         {
-            laser_read.centroid.area += laser_read.angle_increment * laser_read.ranges[j];
-            laser_read.centroid.x += ((j) * laser_read.ranges[j] * laser_read.angle_increment); // x (in deg) * f(x) * dx
+            laser_read.centroid.sum_moment += (j * laser_read.ranges[j]);
+            laser_read.centroid.sum_x += laser_read.ranges[j]; // x (in deg) * f(x) * dx
         } 
     }
-    laser_read.centroid.x = laser_read.centroid.x / laser_read.centroid.area;
+    laser_read.centroid.x = laser_read.centroid.sum_moment / laser_read.centroid.sum_x;
+    // Normalize centroid
+    laser_read.centroid.normalized = ((laser_read.centroid.x / 400) - 1.35);
 }
 
-void WallFollower::calculateControl(void)
+float32_t WallFollower::calculateControl(float32_t centroid)
 {
-#if (CONTROL == RIGHT)
-    control.error[0] = control.setpoint - laser_read.min_ranges[DER];     
-#elif (CONTROL == LEFT)
-    control.error[0] = laser_read.min_ranges[IZQ] - control.setpoint;
-#else // CENTER
-    // control.setpoint = (laser_read.min_ranges[DER] + laser_read.min_ranges[IZQ]) / 2;
     // control.error[0] = control.setpoint - laser_read.min_ranges[DER];
-    control.setpoint = 540; //scan_points[1].begin;
-    control.error[0] = laser_read.centroid.x - control.setpoint;
-#endif
+    control.setpoint = 0; //scan_points[1].begin;
+    control.error[0] = centroid - control.setpoint;
     float32_t Up = control.gains.Kp * control.error[0];
     float32_t Ui = control.gains.Ki * control.dt * (control.error[0] - control.error[1]) / 2;
     float32_t Ud = control.gains.Kd * (1 / control.dt) * (control.error[0] - control.error[1]);
     float32_t U  = Up + Ui + Ud;
-    
-    steer.output = (((steer.max_value) / (control.gains.Kp * 270)) * U);
-
-    int sign = steer.output >= 0 ? 1 : -1;
-
-    steer.output = abs(steer.output) >= (steer.max_value) ? \
-                    (sign * steer.max_value) : (steer.output);
 
     control.error[1] = control.error[0];
+    
+    // steer.output = (((steer.max_value) / (control.gains.Kp * 270)) * U);
+
+    // int sign = steer.output >= 0 ? 1 : -1;
+
+    // steer.output = abs(steer.output) >= (steer.max_value) ? \
+    //                 (sign * steer.max_value) : (steer.output);
+
+    // return std::min(std::max(-1.0, U), 1.0);
+    return fmin(fmax(-1.0, U), 1.0);
 }
 
 void WallFollower::takeAction(void)
 {
-    calculateControl();
-    // if (laser_read.min_ranges[FRONT] <= 0.2)
-    // {
-    //     car_speed = -5.0;
-    //     steer.output = (steer.output >= 0) ? (-1.0 * steer.max_value) : steer.max_value;
-    // }
-    // else if ((laser_read.min_ranges[FRONT] > 0.2) && (laser_read.min_ranges[FRONT] <= 0.9))
-    // {
-    //     int steer_sign = (steer.output >= 0) ? (-1.0 * steer.max_value) : (steer.max_value) ;
-    //     steer.output = (car_speed == -5.0) ? steer_sign : steer.output;
-    // }
-    // else if ((laser_read.min_ranges[FRONT] > 0.9) && (laser_read.min_ranges[FRONT] <= 1.4))
-    // {
-    //     car_speed = 1.0;
-    // }
-    // else if ((laser_read.min_ranges[FRONT] > 1.4))
-    // {
-    //     car_speed = 2.0;
-    // }
-    setCarMovement(steer.output, 0.1, car_speed, 0.0, 0.0);
+    steer.output = calculateControl(laser_read.centroid.normalized);
+    setCarMovement(steer.output, 0.0, car_speed, 0.0, 0.0);
     publishAckermannMsg();
     // ROS_INFO("%f, %f, %f, %f", _car.drive.steering_angle, _car.drive.speed, \
     //             laser_read.min_ranges[DER], laser_read.min_ranges[FRONT]);
-#if (CONTROL == LEFT)
-    ROS_INFO("IZQ: %f, Giro: %f, Speed: %f, Error: %f", laser_read.min_ranges[IZQ], _car.drive.steering_angle,\
-                _car.drive.speed, control.error[0]);
-#elif (CONTROL == RIGHT)
-    ROS_INFO("DER: %f, Giro: %f, Speed: %f, Error: %f", laser_read.min_ranges[DER], _car.drive.steering_angle,\
-                _car.drive.speed, control.error[0]);
-#else // CENTER
-    ROS_INFO("Centroid: %f, Setpoint: %d, Giro: %f, Speed: %f, Error: %f", laser_read.centroid.x, scan_points[1].begin,\
+
+    ROS_INFO("Centroid: %f, Setpoint: %d, Steer: %f, Speed: %f, Error: %f", laser_read.centroid.normalized, scan_points[1].begin,\
                 _car.drive.steering_angle, _car.drive.speed, control.error[0]);
-#endif
 }
 
 void WallFollower::setCarMovement(float32_t steering_angle, float32_t steering_angle_velocity, \
