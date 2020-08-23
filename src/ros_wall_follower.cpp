@@ -14,6 +14,11 @@
 
 #define CSV_RATE 0.1f // [s]
 
+#define QX odom.quaternion.x
+#define QY odom.quaternion.y
+#define QZ odom.quaternion.z
+#define QW odom.quaternion.w
+
 // using namespace std;
 using sensor_msgs::LaserScan;
 using nav_msgs::Odometry;
@@ -22,6 +27,9 @@ using ackermann_msgs::AckermannDriveStamped;
 typedef float float32_t;
 typedef double float64_t;
 
+/*
+/   LaserScan Data Structs/Enums
+*/
 typedef enum regions_E
 {
     DER = 0,
@@ -29,12 +37,15 @@ typedef enum regions_E
     NUM_REGIONS   
 }regions_e;
 
+typedef struct ranges_index_S
+{
+    int begin;
+    int end;
+} ranges_index_s;
+
 typedef struct centroid_S
 {
-    float32_t sum_moment;
-    float32_t sum_x;
-    float32_t x;
-    float32_t normalized;
+    float32_t sum_moment, sum_x, x, normalized;
 }centroid_s;
 
 typedef struct laser_read_S
@@ -42,9 +53,42 @@ typedef struct laser_read_S
     float32_t angle_increment;
     float32_t min_ranges[5];
     std::vector<float32_t> ranges;
-    std::vector<float32_t>::iterator range_iter;
     centroid_s centroid;
 }laser_read_s;
+
+/*
+/   Odometry Data Structs/Enums
+*/
+
+typedef enum euler_E
+{
+    ROLL = 0,       // X
+    PITCH,          // Y
+    YAW,            // Z
+    EULER_ANGLES
+} euler_e;
+
+typedef struct quaternions_S
+{
+    float64_t x, y, z, w;
+} quaternions_s;
+
+typedef struct odom_coord_S
+{
+    float32_t x, y, magnitude;
+} odom_coord_s;
+
+typedef struct odom_data_S
+{
+    odom_coord_s current_pos;
+    odom_coord_s current_vel;
+    quaternions_s quaternion;
+    float64_t euler[EULER_ANGLES];
+} odom_data_s;
+
+/*
+/   PID Control Data Structs/Enums
+*/
 
 typedef struct pid_control_S
 {
@@ -61,21 +105,8 @@ typedef struct pid_control_S
 
 typedef struct steering_params_S
 {
-    float32_t output;
-    float32_t max_value;
+    float32_t output, max_value;
 } steering_params_s;
-
-typedef struct ranges_index_S
-{
-    int begin;
-    int end;
-} ranges_index_s;
-
-typedef struct odom_coord_S
-{
-    float32_t x;
-    float32_t y;
-} odom_coord_s;
 
 class WallFollower
 {
@@ -105,14 +136,16 @@ public:
     void takeAction(void);
     void publishAckermannMsg(void);
     void outputCSV(void);
+    void getWaypoints(void);
 
-    laser_read_s              laser_read;
+    odom_data_s               odom;
+    laser_read_s              laser;
     pid_control_s             control;
     steering_params_s         steer;
     float32_t                 car_speed;
     std::vector<odom_coord_s> waypoints;
     std::fstream              fout;
-    uint                      csv_count;
+    unsigned int              csv_count;
     const ranges_index_s      scan_points[NUM_REGIONS] =
     {
         {140, 539}, // 0 - DER
@@ -160,9 +193,9 @@ WallFollower::~WallFollower()
 void WallFollower::_scanCallback(const sensor_msgs::LaserScan &msg)
 {
     _laser = msg;
-    // laser_read.angle_increment = _laser.angle_increment;
-    laser_read.angle_increment = 0.25;
-    laser_read.ranges = _laser.ranges;
+    // laser.angle_increment = _laser.angle_increment;
+    laser.angle_increment = 0.25;
+    laser.ranges = _laser.ranges;
     // getScanRanges();
     getScanCentroid();
 }
@@ -185,6 +218,36 @@ void WallFollower::_timer1Callback(const ros::TimerEvent &event)
 void WallFollower::_odomCallback(const nav_msgs::Odometry &msg)
 {
     _odom = msg;
+    odom.current_pos.x = _odom.pose.pose.position.x;
+    odom.current_pos.y = _odom.pose.pose.position.y;
+    odom.current_vel.x = _odom.twist.twist.linear.x;
+    odom.current_vel.y = _odom.twist.twist.linear.y;
+    odom.current_vel.magnitude = hypot(odom.current_vel.x, odom.current_vel.y);
+
+    // Method 1 
+    // quaternions_s orientation = {   // Not valid due to "quaternion_s" not member or WallFollower
+    // struct {                        // Not valid due to unamed struct does not corresponds to quaternion_s when assigning
+    //     float64_t x, y, z, w;
+    // } orientation = {
+    //     x : _odom.pose.pose.orientation.x,
+    //     y : _odom.pose.pose.orientation.y,
+    //     z : _odom.pose.pose.orientation.z,
+    //     w : _odom.pose.pose.orientation.w,
+    // };
+    // odom.quaternion = orientation;
+
+    // Method 2
+    std::tie(odom.quaternion.x, odom.quaternion.y, odom.quaternion.z, odom.quaternion.w) \
+            = std::make_tuple(_odom.pose.pose.orientation.x, _odom.pose.pose.orientation.y, \
+                                _odom.pose.pose.orientation.z, _odom.pose.pose.orientation.w);
+
+    float64_t euler_from_quaternion[] = {
+        atan2((2 * (QW * QX + QY * QZ)), (1 - 2 * (QX * QX + QY * QY))),
+        asin(2 * ((QW * QY) - (QX * QZ))),
+        atan2((2 * (QW * QZ + QX * QY)), (1 - 2 * (QY * QY + QZ * QZ)))
+    };
+    // odom.euler = euler_angles; // Invalid array assignment
+    memcpy(odom.euler, euler_from_quaternion, sizeof(odom.euler));
 }
 
 void WallFollower::getScanRanges(void)
@@ -192,53 +255,50 @@ void WallFollower::getScanRanges(void)
     for (int i = 0; i < NUM_REGIONS; i++)
     {
         int j = scan_points[i].begin;
-        float32_t min_val = laser_read.ranges[j];
+        float32_t min_val = laser.ranges[j];
         for (; j <= scan_points[i].end; j++)
         {
-            min_val = (laser_read.ranges[j] < min_val) ? laser_read.ranges[j] : min_val;
+            min_val = (laser.ranges[j] < min_val) ? laser.ranges[j] : min_val;
         }
-        laser_read.min_ranges[i] = min_val;   
+        laser.min_ranges[i] = min_val;   
     }
 
     // ROS_INFO("DER: %f, ANG_DER: %f, FRENTE: %f, ANG_IZQ: %f, IZQ: %f",
-    //          laser_read.min_ranges[DER], laser_read.min_ranges[FR_DER], laser_read.min_ranges[FRONT], \
-    //          laser_read.min_ranges[FR_IZQ], laser_read.min_ranges[IZQ]);
+    //          laser.min_ranges[DER], laser.min_ranges[FR_DER], laser.min_ranges[FRONT], \
+    //          laser.min_ranges[FR_IZQ], laser.min_ranges[IZQ]);
 }
 
 void WallFollower::getScanCentroid(void)
 {
-    laser_read.centroid.sum_moment = 0.0;
-    laser_read.centroid.sum_x = 0.0;
-    laser_read.range_iter = laser_read.ranges.begin();
-    auto start_iter = next(laser_read.ranges.begin(), scan_points[DER].begin);
-    auto end_iter   = next(laser_read.ranges.begin(), scan_points[IZQ].end);
-
-    int index = scan_points[DER].begin;
+    laser.centroid.sum_moment = 0.0;
+    laser.centroid.sum_x      = 0.0;
+    auto start_iter     = next(laser.ranges.begin(), scan_points[DER].begin);
+    auto end_iter       = next(laser.ranges.begin(), scan_points[IZQ].end);
+    unsigned int index  = scan_points[DER].begin;
     // [&] "Captures" external variables as reference into the lambda functions. Can pass [&index] alone, or any other variable
     std::for_each(start_iter, end_iter, [&] (const float32_t value)
     {
-        laser_read.centroid.sum_moment += (index * value);
-        laser_read.centroid.sum_x += value;
+        laser.centroid.sum_moment += (index * value);
+        laser.centroid.sum_x += value;
         ++index; 
-    }
-    );
+    } );
     // for (int i = 0; i < NUM_REGIONS; i++)
     // {
     //     for (int j = scan_points[i].begin; j <= scan_points[i].end; j++)
     //     {
-    //         laser_read.centroid.sum_moment += (j * laser_read.ranges[j]);
-    //         laser_read.centroid.sum_x += laser_read.ranges[j]; // x (in deg) * f(x) * dx
+    //         laser.centroid.sum_moment += (j * laser.ranges[j]);
+    //         laser.centroid.sum_x += laser.ranges[j]; // x (in deg) * f(x) * dx
     //     } 
     // }
-    laser_read.centroid.x = laser_read.centroid.sum_moment / laser_read.centroid.sum_x;
+    laser.centroid.x = laser.centroid.sum_moment / laser.centroid.sum_x;
     // Normalize centroid
-    laser_read.centroid.normalized = ((laser_read.centroid.x / 400) - 1.35);
+    laser.centroid.normalized = ((laser.centroid.x / 400) - 1.35);
 }
 
 float32_t WallFollower::calculateControl(float32_t centroid)
 {
-    // control.error[0] = control.setpoint - laser_read.min_ranges[DER];
-    control.setpoint = 0; //scan_points[1].begin;
+    // control.error[0] = control.setpoint - laser.min_ranges[DER];
+    control.setpoint = 0; // scan_points[1].begin;
     control.error[0] = centroid - control.setpoint;
     float32_t Up = control.gains.Kp * control.error[0];
     float32_t Ui = control.gains.Ki * control.dt * (control.error[0] - control.error[1]) / 2;
@@ -260,13 +320,13 @@ float32_t WallFollower::calculateControl(float32_t centroid)
 
 void WallFollower::takeAction(void)
 {
-    steer.output = calculateControl(laser_read.centroid.normalized);
+    steer.output = calculateControl(laser.centroid.normalized);
     setCarMovement(steer.output, 0.0, car_speed, 0.0, 0.0);
     publishAckermannMsg();
     // ROS_INFO("%f, %f, %f, %f", _car.drive.steering_angle, _car.drive.speed, \
-    //             laser_read.min_ranges[DER], laser_read.min_ranges[FRONT]);
+    //             laser.min_ranges[DER], laser.min_ranges[FRONT]);
 
-    ROS_INFO("Centroid: %f, Setpoint: %d, Steer: %f, Speed: %f, Error: %f", laser_read.centroid.normalized, scan_points[1].begin,\
+    ROS_INFO("Centroid: %f, Setpoint: %d, Steer: %f, Speed: %f, Error: %f", laser.centroid.normalized, scan_points[1].begin,\
                 _car.drive.steering_angle, _car.drive.speed, control.error[0]);
 }
 
@@ -289,6 +349,12 @@ void WallFollower::outputCSV(void)
 {
     fout << waypoints[csv_count].x << "," << waypoints[csv_count].y << "\n";
     ++csv_count;
+}
+
+void WallFollower::getWaypoints(void)
+{
+    
+
 }
 
 int main(int argc, char** argv)
