@@ -69,7 +69,7 @@ class WallFollower(PID, Odom, Centroid):
 
         self.max_steering    = 1.0
         self.steering_output = 0.0
-        self.vel             = 3.0
+        self.vel             = 5.0
         self.acker_msg       = AckermannDriveStamped()
         self.regions         = defaultdict(lambda: float)
 
@@ -118,24 +118,24 @@ class WallFollower(PID, Odom, Centroid):
 
     def timerCallback(self, event):
         self.steering_output = self.calculateControl(self.normalized_centroid)
-        self.vel = 5.0 - abs(self.steering_output) * 2.4
+        self.vel = 5.0 - abs(self.steering_output) * 3.0/1.22
         self.setCarMovement(self.steering_output, 0.0, self.vel, 0.0, 0.0)
         self.drive_pub.publish(self.acker_msg)
         self.getWaypoints()
         
-        rospy.loginfo("Steer: {}, Error:{} vel:{}, Centroid: {}".format(self.steering_output,
-                        self.error[0], self.current_vel['total'], self.centroid))
+        #rospy.loginfo("Steer: {}, Error:{} vel:{}, Centroid: {}".format(self.steering_output,
+        #                self.error[0], self.current_vel['total'], self.centroid))
 
     def getWaypoints(self):
         if ( (np.hypot((self.current_pos['x'] - self.prev_pos['x']),
-                        (self.current_pos['y'] - self.prev_pos['y']))) >= (self.wheelbase * 1.0) ):
+                        (self.current_pos['y'] - self.prev_pos['y']))) >= (self.wheelbase * 0.1) ):
             self.prev_pos['x'] = self.current_pos['x']                          # Change value of prev x on dict
             self.prev_pos['y'] = self.current_pos['y']                          # Change value of prev y on dict
             waypoint_x2 = self.current_pos['x'] + ((self.wheelbase / 2) * np.cos(self.orientation.euler['yaw'])) # Get waypoint to the rear x axis
             waypoint_y2 = self.current_pos['y'] + ((self.wheelbase / 2) * np.sin(self.orientation.euler['yaw'])) # Get waypoint to the rear y axis
             self.waypoints.append( [waypoint_x2, waypoint_y2,
                                     self.current_vel['total']] )                # List appending x data
-            np.savetxt('./ros_wall_follower/scripts/odom_data.csv', self.waypoints, delimiter = ",")
+            np.savetxt('./ros_wall_follower/scripts/odom_data_corto.csv', self.waypoints, delimiter = ",")
 
 
 if __name__ == "__main__":

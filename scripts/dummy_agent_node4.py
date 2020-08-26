@@ -86,7 +86,7 @@ class Agent(object):
 
         # measurements are stored in a dat file
         self.odom_list.append([self.current_x, self.current_y, self.current_v])
-        np.savetxt('odom_data.dat', self.odom_list)
+        np.savetxt('./ros_wall_follower/scripts/odom_dummy_data.csv', self.odom_list, delimiter=',')
 
 if __name__ == '__main__':
     rospy.init_node('dummy_agent')
