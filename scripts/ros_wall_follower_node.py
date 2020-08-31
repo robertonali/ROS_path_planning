@@ -135,7 +135,7 @@ class WallFollower(PID, Odom, Centroid):
             waypoint_y2 = self.current_pos['y'] + ((self.wheelbase / 2) * np.sin(self.orientation.euler['yaw'])) # Get waypoint to the rear y axis
             self.waypoints.append( [waypoint_x2, waypoint_y2,
                                     self.current_vel['total']] )                # List appending x data
-            np.savetxt('./ros_wall_follower/scripts/odom_data_corto.csv', self.waypoints, delimiter = ",")
+            np.savetxt('./ros_wall_follower/scripts/odom_data_zoom.csv', self.waypoints, delimiter = ",")
 
 
 if __name__ == "__main__":

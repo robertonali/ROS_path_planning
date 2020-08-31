@@ -28,7 +28,7 @@ class WallFollower(object):
         self.vel = 1.0
         self.track = .28
         self.wbase = .40
-        self.waypoints = np.genfromtxt('./ros_wall_follower/scripts/odom_data_corto.csv', delimiter=',')
+        self.waypoints = np.genfromtxt('./ros_wall_follower/scripts/odom_data.csv', delimiter=',')
         self.wp_size = self.waypoints.size
         self.wp_index = 0
         self.yaw = 0.0
