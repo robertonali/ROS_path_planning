@@ -54,9 +54,7 @@ class Steering(object):
 class PurePursuit(PID, Odom, Steering):
     def __init__(self):
         # self.pid = PID(1.0, 0.0, 0.0)
-        PID.__init__(self, 2.12, 0.00, 0.42)  # 1.50, 0.4
-        # 1.70, 0.4
-        # 2.12, 0.42
+        PID.__init__(self, 2.15, 0.00, 0.75)
         Odom.__init__(self)
         Steering.__init__(self)
 
@@ -70,11 +68,11 @@ class PurePursuit(PID, Odom, Steering):
         # LateralKinematics variables
         self.ld     = 0.0
         self.ldcalc = 0.0
-        self.kdd    = 0.40
+        self.kdd    = 0.30   # 0.40
         self.alpha  = 0.0    # Angle between actual car position and waypoint ahead (gama - yaw)
         self.gamma  = 0.0    # Angle between 0deg and waypoint ahead
         self.delta  = 0.0    # Turning wheels angle.
-        self.crosstrack_e = 0.0
+        self.crosstrack_error = 0.0
         self.orientation.euler['yaw'] = 0.0
         #
         self.next_target = True
@@ -106,7 +104,7 @@ class PurePursuit(PID, Odom, Steering):
         
     def takeAction(self):
         if (self.next_target):
-            self.calcLateralKinematics()
+            self.calcLateralKinematics() # kdd = 4
             self.next_target = False
         # elif (math.sqrt((self.waypoints[self.wp_index, 0] - self.x2) ** 2 + ((self.waypoints[self.wp_index, 1] - self.y2) ** 2))
         #         <= 1.2) :
@@ -117,17 +115,16 @@ class PurePursuit(PID, Odom, Steering):
             self.index += 1
         else:
             pass
-        
-        self.crosstrack_e = self.ldcalc * math.sin(self.alpha)
-        # self.crosstr_error_norm = self.crosstr_error * (2 / (self.ld)**2)
-        # self.calculateControl(self.crosstrack_e)
-        # self.delta = math.atan2( (2 * self.wheelbase * math.sin(self.alpha)), (self.U * (self.current_vel['total'])) )
+            
+        # self.calcLateralKinematics()
+        self.calculateControl(self.crosstrack_error)
+        self.delta = np.arctan2( (2 * self.wheelbase * (self.U)), (self.ld)**2 )
 
-        self.steering_output = self.delta
+        self.steering_output = self.delta # min(max(-self.max_steering, self.delta), self.max_steering)
         self.setCarMovement(self.steering_output, 0.00, self.waypoints[self.index, 2], 0.0, 0.0)
         
         rospy.loginfo("LDCacl:{} , LD: {}, VEL: {} ".format(self.ldcalc, self.ld, self.current_vel['total']))
-        rospy.loginfo("Steer: {}, ".format(self.steering_output))
+        rospy.loginfo("Steer: {}, Delta: {}".format(self.steering_output, self.delta))
 
     def calcLateralKinematics(self):
         # self.ld = math.sqrt((self.waypoints[self.wp_index,0] - self.current_pos['x2']) ** 2 + ((self.waypoints[self.wp_index,1] - self.y2) ** 2))
@@ -136,6 +133,8 @@ class PurePursuit(PID, Odom, Steering):
         self.alpha  = self.gama - self.orientation.euler['yaw']
         self.ldcalc = (self.kdd) * (self.current_vel['total']) 
         self.delta  = math.atan2((2 * self.wheelbase * math.sin(self.alpha)), (self.ldcalc))
+        self.crosstrack_error = self.ldcalc * math.sin(self.alpha)
+        # self.crosstr_error_norm = self.crosstrack_error * (2 / (self.ld)**2)
     
     def setCarMovement(self, steering_angle, steering_angle_velocity, speed,
                         acceleration, jerk):
@@ -144,17 +143,6 @@ class PurePursuit(PID, Odom, Steering):
         self.acker_msg.drive.speed = speed
         # self.acker_msg.drive.acceleration = acceleration
         # self.acker_msg.drive.jerk = jerk
-
-    # def getWaypoints(self):
-    #     if ( (np.hypot((self.current_pos['x'] - self.prev_pos['x']),
-    #                     (self.current_pos['y'] - self.prev_pos['y']))) >= (self.wheelbase * 0.1) ):
-    #         self.prev_pos['x'] = self.current_pos['x']                          # Change value of prev x on dict
-    #         self.prev_pos['y'] = self.current_pos['y']                          # Change value of prev y on dict
-    #         waypoint_x2 = self.current_pos['x'] + ((self.wheelbase / 2) * np.cos(self.orientation.euler['yaw'])) # Get waypoint to the rear x axis
-    #         waypoint_y2 = self.current_pos['y'] + ((self.wheelbase / 2) * np.sin(self.orientation.euler['yaw'])) # Get waypoint to the rear y axis
-    #         self.waypoints.append( [waypoint_x2, waypoint_y2,
-    #                                 self.current_vel['total']] )                # List appending x data
-    #         np.savetxt('./ros_wall_follower/scripts/csv/odom_data_zoom.csv', self.waypoints, delimiter = ",")
 
 
 if __name__ == "__main__":
