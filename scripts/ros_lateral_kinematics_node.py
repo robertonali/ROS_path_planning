@@ -104,7 +104,7 @@ class PurePursuit(PID, Odom, Steering):
         
     def takeAction(self):
         if (self.next_target):
-            self.calcLateralKinematics() # kdd = 4
+            # self.calcLateralKinematics() # kdd = 4
             self.next_target = False
         # elif (math.sqrt((self.waypoints[self.wp_index, 0] - self.x2) ** 2 + ((self.waypoints[self.wp_index, 1] - self.y2) ** 2))
         #         <= 1.2) :
@@ -116,9 +116,9 @@ class PurePursuit(PID, Odom, Steering):
         else:
             pass
             
-        # self.calcLateralKinematics()
-        self.calculateControl(self.crosstrack_error)
-        self.delta = np.arctan2( (2 * self.wheelbase * (self.U)), (self.ld)**2 )
+        self.calcLateralKinematics()
+        # self.calculateControl(self.crosstrack_error)
+        # self.delta = np.arctan2( (2 * self.wheelbase * (self.U)), (self.ld)**2 )
 
         self.steering_output = self.delta # min(max(-self.max_steering, self.delta), self.max_steering)
         self.setCarMovement(self.steering_output, 0.00, self.waypoints[self.index, 2], 0.0, 0.0)
