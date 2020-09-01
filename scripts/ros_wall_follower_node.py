@@ -18,18 +18,14 @@ class PID(object):
         self.U        = 0.0
     
     def calculateControl(self, centroid):
-        self.setpoint = 0
-        self.error[0] = centroid - self.setpoint #self.regions['IZQ']- self.regions['DER']
+        self.setpoint = 0 # -1, 1
+        self.error[0] = centroid - self.setpoint # self.regions['IZQ']- self.regions['DER']
         Up = self.gains['Kp'] * self.error[0]
         Ui = self.gains['Ki'] * ((self.error[0] + self.error[1]) / 2) * self.dt
         Ud = self.gains['Kd'] * (self.error[0] - self.error[1]) * (1 / self.dt)
 
         self.U = Up + Ui + Ud
 
-        # self.steering_output = ((self.max_steering) / (self.gains['Kp'] * 270) * U)
-        # sign = 1 if (self.steering_output >= 0) else -1
-        # self.steering_output = (sign * self.max_steering) if (abs(self.steering_output) >= self.max_steering) else self.steering_output
-        # self.steering_output = min(max(-1., self.U),1)
         self.error[1] = self.error[0]
         return min(max(-1.0, self.U), 1.0)
 
@@ -39,8 +35,6 @@ class Orientation(object):
             self.euler      = defaultdict(lambda: float)
 class Odom(object):
     def __init__(self):
-        # self.waypoints_x = list()
-        # self.waypoints_y = list()
         self.waypoints   = list()
         self.current_pos = {'x': 0.0, 'y': 0.0}
         self.prev_pos    = {'x': 0.0, 'y': 0.0}
@@ -62,9 +56,7 @@ class WallFollower(PID, Odom, Centroid):
         PID.__init__(self, 2.12, 0.00, 0.42)  # 1.50, 0.4
         # 1.70, 0.4
         # 2.12, 0.42
-
         Centroid.__init__(self)
-
         Odom.__init__(self)
 
         self.max_steering    = 1.0
@@ -95,18 +87,9 @@ class WallFollower(PID, Odom, Centroid):
             self.orientation.euler['yaw']) = transformations.euler_from_quaternion(self.orientation.quaternion)
             
     def laserCallback(self, msg):
-        # self.regions = {
-        #     'DER'   : np.array(msg.ranges[138:539]),
-        #     'IZQ'   : np.array(msg.ranges[541:940])
-        # }
-        # for i in range(140,940):
-        #     self.area = self.area + (msg.ranges[i] * .25)
-        #     self.moment = self.moment + (i * msg.ranges[i] * .25)
-        # self.centroid = self.moment / self.area
         self.centroid = np.divide(np.sum(np.multiply(msg.ranges[140:940], np.arange(140, 940))),
                     np.sum(msg.ranges[140:940]))
         self.normalized_centroid = ((self.centroid / 400) - 1.35)
-        # rospy.loginfo(self.normalized_centroid)
 
     def setCarMovement(self, steering_angle, steering_angle_velocity, speed,
                         acceleration, jerk):
@@ -122,8 +105,7 @@ class WallFollower(PID, Odom, Centroid):
         self.setCarMovement(self.steering_output, 0.0, self.vel, 0.0, 0.0)
         self.drive_pub.publish(self.acker_msg)
         self.getWaypoints()
-        
-        #rospy.loginfo("Steer: {}, Error:{} vel:{}, Centroid: {}".format(self.steering_output,
+        # rospy.loginfo("Steer: {}, Error:{} vel:{}, Centroid: {}".format(self.steering_output,
         #                self.error[0], self.current_vel['total'], self.centroid))
 
     def getWaypoints(self):
@@ -135,7 +117,7 @@ class WallFollower(PID, Odom, Centroid):
             waypoint_y2 = self.current_pos['y'] + ((self.wheelbase / 2) * np.sin(self.orientation.euler['yaw'])) # Get waypoint to the rear y axis
             self.waypoints.append( [waypoint_x2, waypoint_y2,
                                     self.current_vel['total']] )                # List appending x data
-            np.savetxt('./ros_wall_follower/scripts/odom_data_zoom.csv', self.waypoints, delimiter = ",")
+            np.savetxt('./ros_wall_follower/scripts/csv/odom_data_zoom.csv', self.waypoints, delimiter = ",")
 
 
 if __name__ == "__main__":
