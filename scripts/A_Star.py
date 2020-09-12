@@ -39,7 +39,6 @@ def Astar(maze, start, end, fig):
 
     # Add the start node
     openList.append(startNode)
-    
     n = 1
     # Loop until you find the end
     while len(openList) > 0:
@@ -55,14 +54,13 @@ def Astar(maze, start, end, fig):
         # Pop current off open list, add to closed list
         openList.pop(current_index)
         closedList.append(currentNode)
-
         # Found the goal
         if currentNode == endNode:
             path = []
             waypoints = []
             current = currentNode
             while current is not None:
-                current_wp = (0.05 * (current.position[1] - 232), 0.05 * (70 - current.position[0]))
+                current_wp = (0.05 * (current.position[1] - 232/rs), 0.05 * (70/rs - current.position[0]))
                 path.append(current.position)
                 waypoints.append(current_wp)
                 current = current.parent
@@ -71,6 +69,7 @@ def Astar(maze, start, end, fig):
             # pltMaze(mm, fig)
             # waypoints = waypoints[::-1]
             # print(waypoints)
+            # waypoints tiene path con 1 pixel ralacionado a un peque;o
             return (path[::-1], waypoints[::-1]) # Return reversed path
 
         # Generate children
@@ -79,7 +78,7 @@ def Astar(maze, start, end, fig):
 
             # Get node position
             nodePosition = (currentNode.position[0] + x, currentNode.position[1] + y)
-
+            
             # Make sure within range
             if nodePosition[0] > (len(maze) - 1) or nodePosition[0] < 0 or nodePosition[1] > (len(maze[len(maze)-1]) -1) or nodePosition[1] < 0:
                 continue
@@ -89,13 +88,12 @@ def Astar(maze, start, end, fig):
                 continue
             # if maze[nodePosition[0]][nodePosition[1]] != 0:
             #     continue
-
             # Create new node
             newNode = Node(currentNode, nodePosition)
 
             # Append
             children.append(newNode)
-
+            
         # Loop through children
         for child in children:
 
@@ -151,16 +149,18 @@ def click_event(event,x,y,flags,param):
     if event==cv2.EVENT_RBUTTONDOWN:
         print('FIN')
         point = (y, x)
+        print(point)
         end.append(point)
         index = index + 1
 
 if __name__ == "__main__":
-    image=cv2.imread('/home/user/catkin_ws/src/ros_wall_follower/Maps/berlin_5cm.png')
+    image=cv2.imread("/home/user/catkin_ws/src/ros_wall_follower/maps/hector_slam/berlin_5cm.pgm")
     cv2.imshow('ferdinand',image)
-    img=cv2.resize(image,None,fx=1.0,fy=1.0)
+    rs=4.0
+    img=cv2.resize(image,None,fx=1.0/rs,fy=1.0/rs)
     gray=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
     ret, thresh=cv2.threshold(gray,127,255,cv2.THRESH_BINARY_INV)
-    norm=np.array(thresh/254)
+    # norm=np.array(thresh/254)
     cv2.imshow("popo",gray)
     np.set_printoptions(threshold=sys.maxsize)
     #print(gray)
@@ -169,7 +169,7 @@ if __name__ == "__main__":
     cv2.setMouseCallback("popo",click_event)
     # start = ()
     # end = ()
-    start = (70, 232)
+    start = (int(np.floor(70/rs)), int(np.floor(232/rs)))
     # end = (75, 240)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
@@ -180,11 +180,11 @@ if __name__ == "__main__":
         [pathAstar, wpAstar] = Astar(norm, start, end[num], None)
         start = end[num]
         num += 1
-        wpCSV += wpAstar[:-1]
+        wpCSV += 4*wpAstar[:-1]
         print(pathAstar)
         print(wpAstar)
 
-    np.savetxt('./scripts/odom_data_A*.csv',wpCSV, delimiter = ",")
+    np.savetxt('./scripts/odom_data_4A*.csv',wpCSV, delimiter = ",")
     # fig = plt.figure(figsize = (20, 20))  # create a figure object
     # normCopy = norm.copy()
     # normCopy[start] = 2
