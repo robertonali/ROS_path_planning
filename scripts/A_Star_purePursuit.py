@@ -10,6 +10,7 @@ from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
 from collections import defaultdict
 from tf import transformations
+import time
 
 class PID(object):
     def __init__(self, kp, ki, kd):
@@ -347,7 +348,10 @@ class PurePursuit(PID, Odom, Steering, AStar):
         if (self.as_active and self.ready):
             self.as_active = False
             rospy.loginfo("Process")
+            s = time.time() 
             self.process()
+            e = time.time()
+            print(e-s)
             self.index = 0
             self.move = True
         rospy.loginfo("Paso")
