@@ -1,12 +1,13 @@
 #! /usr/bin/env python
 
+import pdb
 import rospy
 import math
 import numpy as np
-import pandas as pd
 import cv2
-import time
+import sys
 import getpass
+import time
 from sensor_msgs.msg import LaserScan
 from ackermann_msgs.msg import AckermannDriveStamped
 from nav_msgs.msg import Odometry
@@ -33,193 +34,88 @@ class PID(object):
         self.error[1] = self.error[0]
         # return min(max(-max_val, self.U), max_val)
 
+class Steering(object):
+    def __init__(self):
+        self.max_steering    = 1.22
+        self.steering_output = 0.0
+
 class Orientation(object):
         def __init__(self):
             self.quaternion = list()
             self.euler      = defaultdict(lambda: float)
-            
+
 class Odom(object):
     def __init__(self):
-        self.waypoints   = np.genfromtxt('./ros_wall_follower/scripts/csv/odom_data.csv', delimiter=',')
         self.current_pos = {'x': 0.0, 'y': 0.0, 'x2': 0.0, 'y2': 0.0}
         self.prev_pos    = {'x': 0.0, 'y': 0.0}
         self.current_vel = {'x': 0.0, 'y': 0.0, 'total': 0.0}
         self.orientation = Orientation() 
         self.track       = 0.28
         self.wheelbase   = 0.40
-        
-class Steering(object):
+
+class PotentialField(object):
     def __init__(self):
-        self.max_steering    = 1.22
-        self.steering_output = 0.0
+        self.end      = list()
+        self.start    = [70, 232]
+        self.index2   = 0
+        self.rs       = 1.0
+        self.norm     = 0
+        self.dist     = 0
+        self.th       = 1*0.06  # threshold repulsivo, multiplo de track del auto track =0.28m
+        self.attr_g   = 150.0   # ganancia de atraccion, tunear
+        self.etha     = 6.0     # constante repulsiva, tunearla
+        self.rep      = 0.0
+        self.pmap_res = 0.0
 
-class Node(object):
-    """A node class for A* Pathfinding"""
-
-    def __init__(self, parent=None, position=None):
-        self.parent = parent
-        self.position = position
-
-        self.g = 0
-        self.f = 0
-
-    def __eq__(self, other):
-        return self.position == other.position
-
-class AStar(object):
-    def __init__(self):
-        # Reduction factor
-        self.rs     = 4.0
-        self.start = (int(np.ceil(70/self.rs)),int(np.ceil(232/self.rs)))
-        self.end = list()
-        self.index2 = 0
-        self.norm = 0
-
-        self.num = 0
-        self.wp_pp = 0
-        self.size_wp_pp = 0
-        self.as_active  = True
+        self.move    = False
+        self.pot_active = True
         self.first_loop = True
-        self.move       = False
-        self.finish_wp  = True
-        self.temp_wp    = []
-        self.size_temp_pp  = 0
-        self.index         = 0
+        self.finish_wp = True
         self.process_ready = False
+        self.temp_wp = []
+        self.num = 0
+        self.size_wp_pp = 0
+        self.size_temp_pp = 0
+        self.index      = 0
+
+        # Waypoints
+        # self.inx_act  = 0
+        # self.iny_act  = 0
+        self.pot_current = self.start
+        self.current_wp = 0
+        self.wp_pp = []
+        self.grid_index = []
+        self.minix = 0
+        self.miniy = 0
 
 
     def get_points(self):
-        usr = getpass.getuser()
+        usr =  getpass.getuser()
         image = cv2.imread('/home/{}/catkin_ws/src/ros_wall_follower/maps/hector_slam/berlin_5cm.pgm'.format(usr))
-        # cv2.imshow('ferdinand',image)
         img = cv2.resize(image, None, fx=1.0/self.rs, fy=1.0/self.rs)
         gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-        ret, thresh = cv2.threshold(gray,127,255,cv2.THRESH_BINARY_INV)
-        # self.norm = np.array(thresh/254)
-        cv2.imshow("popo",gray)
-        # np.set_printoptions(threshold=sys.maxsize)
-        # print(gray)
+        ret, thresh = cv2.threshold(gray,127,255,cv2.THRESH_BINARY)
+        cv2.imshow("popo", gray)
         self.norm = np.array(thresh/255)
+        # print(thresh.shape)
+        self.dist = cv2.distanceTransform(thresh, cv2.DIST_L2, 0)
+        # print(self.dist.shape)
+        # print(type(self.dist))
+        # np.set_printoptions(threshold=sys.maxsize)
+        # cv2.imshow('popo2', self.dist)
+        # print(self.dist)
+
+        # Para visualizar es necesario normalizar, pero distance transform ya nos da dq
+        cv2.normalize(self.dist, self.dist, 0, 1.0, cv2.NORM_MINMAX)
+        cv2.imshow('Distance Transform Image', self.dist)
 
         cv2.setMouseCallback("popo", self.click_event)
-        # start = ()
-        # end = ()
-        # self.start = (70, 232)
-        # end = (75, 240)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
-    def solve(self, maze, start, end, fig):
-        """Returns a list of tuples as a path from the given start to the given end in the given maze"""
+        self.ready = True
 
-        # Create start and end node
-        startNode = Node(None, start)
-        startNode.h =  startNode.f = 0
-        startNode.g =  startNode.f = 0
-        endNode = Node(None, end)
-        endNode.h = endNode.f = 0
-        endNode.g = endNode.f = 0
-
-        # Initialize both open and closed list
-        openList = []
-        closedList = []
-
-        # Add the start node
-        openList.append(startNode)
-        
-        n = 1
-        # Loop until you find the end
-        while len(openList) > 0:
-
-            # Get the current node
-            currentNode = openList[0]
-            current_index = 0
-            for index, item in enumerate(openList):
-                if item.f < currentNode.f:
-                    currentNode = item
-                    current_index = index
-
-            # Pop current off open list, add to closed list
-            openList.pop(current_index)
-            closedList.append(currentNode)
-
-            # Found the goal
-            if currentNode == endNode:
-                path = []
-                waypoints = []
-                current = currentNode
-                while current is not None:
-                    current_wp = (0.05 * (current.position[1] - 232/self.rs), 0.05 * (70/self.rs - current.position[0]))
-                    path.append(current.position)
-                    waypoints.append(current_wp)
-                    current = current.parent
-                
-                # mm = genMaze(maze.copy(), start, end, openList, closedList, path[::-1])
-                # pltMaze(mm, fig)
-                # waypoints = waypoints[::-1]
-                # print(waypoints)
-                return (path[::-1], waypoints[::-1]) # Return reversed path
-
-            # Generate children
-            children = []
-            for x, y in [(0, -1), (0, 1), (-1, 0), (1, 0), (-1, -1), (-1, 1), (1, -1), (1, 1)]: # Adjacent squares
-
-                # Get node position
-                nodePosition = (currentNode.position[0] + x, currentNode.position[1] + y)
-
-                # Make sure within range
-                if nodePosition[0] > (len(maze) - 1) or nodePosition[0] < 0 or nodePosition[1] > (len(maze[len(maze)-1]) -1) or nodePosition[1] < 0:
-                    continue
-                # import pdb; pdb.set_trace()
-                # Make sure walkable terrain
-                if maze[nodePosition[0]][nodePosition[1]] != 0:
-                    continue
-                # if maze[nodePosition[0]][nodePosition[1]] != 0:
-                #     continue
-
-                # Create new node
-                newNode = Node(currentNode, nodePosition)
-
-                # Append
-                children.append(newNode)
-
-            # Loop through children
-            for child in children:
-
-                # Child is on the closed list
-                b = False
-                for closedChild in closedList:
-                    if child == closedChild:
-                        b = True #continue
-                        break
-                if b:
-                    continue
-                
-                # Create the f and g
-                # child.g = currentNode.g + 1
-                child.g = ((child.position[0] - endNode.position[0]) ** 2) + ((child.position[1] - endNode.position[1]) ** 2)
-                child.h = ((child.position[0] - startNode.position[0]) ** 2) + ((child.position[1] - startNode.position[1]) ** 2)
-                child.f = child.h + child.g
-
-                # Child is already in the open list
-                b = False
-                for openNode in openList:
-                    if child == openNode and child.h >= openNode.h:
-                        b = True #continue
-                        break
-                if b:
-                    continue
-
-                # Add the child to the open list
-                openList.append(child)
-                
-                # if (n % 2) == 1 :
-                #     mm = genMaze(maze.copy(), start, end, openList, closedList)
-                #     pltMaze(mm, fig)
-                
-            n = n + 1
-
-    def click_event(self, event,x,y,flags,param):
+    def click_event(self, event, x, y,flags,param):
         # if event==cv2.EVENT_LBUTTONDOWN:
         #     print("INIT")
         #     start=(y,x)
@@ -229,38 +125,77 @@ class AStar(object):
             self.end.append(point)
             self.index2 = self.index2 + 1
 
-    def process(self):
-        # wpCSV = []
-        # self.index2 = self.index2 - 1
-        # num = 0
-        # while (num <= self.index):
-        [pathAstar, wpAstar] = self.solve(self.norm, self.start, self.end[self.num], None)
-        self.start = self.end[self.num]
-        self.num += 1
-        self.wp_pp = 4*np.array(wpAstar)
-        self.size_wp_pp = self.wp_pp.shape[0]
-        rospy.loginfo(self.size_wp_pp)
-        self.as_active = False
-        self.process_ready = True
-            # wpCSV += wpAstar[:-1]
-            # print(pathAstar)
-            # print(wpAstar)
+    def potential_process(self):
+        minp = float("inf")
+        motion = self.get_motion_model()
+        for i,_ in enumerate(motion):
+            px = int(motion[i][0])
+            py = int(motion[i][1])
+            self.pmap_res, inx, iny = self.calc_potential_field(self.pot_current, px, py)
+            print("POTENCIAL {}: {}, x:{}, y:{}".format(i, self.pmap_res, inx, iny))
+            if minp > self.pmap_res:
+                minp = self.pmap_res
+                self.minix = inx
+                self.miniy = iny
 
-        # np.savetxt('./scripts/odom_data_A*.csv',wpCSV, delimiter = ",")
+        self.grid_index.append([self.minix, self.miniy])
+        self.current_wp = (0.05 * (self.minix - self.start[1]), 0.05 * (self.start[0] - self.miniy))
+        self.wp_pp.append(self.current_wp)
+        self.pot_current = [self.miniy, self.minix]
 
-class PurePursuit(PID, Odom, Steering, AStar):
+    def calc_potential_field(self, pot_current, point_x, point_y): 
+        pmap_res = 0
+        # self.iny_act  = 70 - (round((np.ceil(round(self.current_pos['y'],2) / 0.05) * 0.05) ,2))/0.05
+        # self.inx_act  = (round((np.ceil(round(self.current_pos['x'],2) / 0.05) * 0.05) ,2))/0.05  + 232
+        index_y = pot_current[0] + point_y
+        index_x = pot_current[1] + point_x
+        # np.hypot = (pos actual, goal)
+        # campo attr
+        self.attr = self.attr_g*((index_y - self.end[self.num][0])**2 + (index_x - self.end[self.num][1])**2)
+        
+        # campo repulsivo
+        if index_x >= len(self.dist) or index_y >= len(self.dist) or index_x < 0 or index_y < 0:
+            pmap_res = float("inf")
+        else:
+            dqnorm = self.dist[int(index_y) ,int(index_x)]
+            dq = dqnorm / 100.0
+            #recorrer dq
+            if dq <= self.th:
+                self.rep  = self.etha*(1.0/dq - 1.0/self.th)**2
+            else:
+                self.rep = 0.0
+            #resultado instantaneo por celda
+            pmap_res = self.attr + self.rep
+        # rospy.loginfo("rep:{}, attr:{} ".format(self.rep, self.attr))
+        return pmap_res, index_x, index_y
+
+    def get_motion_model(self):
+        # checar casillas adyacentes
+        motion = []
+        for i in [-3, 3]:
+            for j in range(-3, 4):
+                if i == j:
+                    motion.append([i, j])
+                else:
+                    motion.append([i, j])
+                    motion.append([j, i])
+        
+        return motion
+
+class PurePursuit(PID, Odom, Steering, PotentialField):
     def __init__(self):
         PID.__init__(self, 2.15, 0.00, 0.75)
         Odom.__init__(self)
         Steering.__init__(self)
-        AStar.__init__(self)
+        PotentialField.__init__(self)
 
         rospy.init_node("dummy_agent")
         self.drive_pub = rospy.Publisher("/drive", AckermannDriveStamped, queue_size=1)
         self.odom_sub  = rospy.Subscriber("/odom", Odometry, self.odomCallback, queue_size=1)
         rospy.Timer(rospy.Duration(self.dt), self.timerCallback)
-        rospy.Timer(rospy.Duration(0.1), self.timerAStarCallback)
+        rospy.Timer(rospy.Duration(0.1), self.timerPotentialCallback)
 
+        self.move    
         self.acker_msg       = AckermannDriveStamped()
         # LateralKinematics variables
         self.ld     = 0.0
@@ -300,17 +235,19 @@ class PurePursuit(PID, Odom, Steering, AStar):
         if self.move:
             self.takeAction()
             self.drive_pub.publish(self.acker_msg)
+        # import pdb; pdb.set_trace()
+        # rospy.loginfo("TIMER CALLBACK")
 
-    def timerAStarCallback(self, event):
+    def timerPotentialCallback(self, event):
         self.contProcess()
 
     def takeAction(self):
         if (np.hypot((self.temp_wp[-1, 0] - self.current_pos['x2']),
                             (self.temp_wp[-1, 1] - self.current_pos['y2']))
                                 <= 3.0): # Distancia Umbral
-            if not self.as_active and not self.process_ready:
+            if not self.pot_active and not self.process_ready:
                 rospy.loginfo("UMBRAL ACTIVADO")
-                self.as_active = True
+                self.pot_active = True
         else:
             pass
 
@@ -370,15 +307,33 @@ class PurePursuit(PID, Odom, Steering, AStar):
             self.first_loop = False
             self.get_points()
             self.ready = True
-        if (self.as_active and self.ready and self.num < (self.index2)):
-            rospy.loginfo("Process")
-            s = time.time() 
-            self.process()
+        else: 
+            pass
+        if (self.pot_active and self.ready and self.num < (self.index2)):
+            rospy.loginfo("PROCESS")
+            self.wp_pp = []
+            self.grid_index = []
+
+            self.d = np.hypot(self.pot_current[0] - self.end[self.num][0],
+                            self.pot_current[1] - self.end[self.num][1])
+            
+            s = time.time()
+            while(self.d >= 10.0):
+                self.potential_process()
+                self.d = np.hypot(self.pot_current[0] - self.end[self.num][0],
+                            self.pot_current[1] - self.end[self.num][1])
+            
             e = time.time()
-            print(e-s)
-            # self.index = 0
-            # self.move = True
-        rospy.loginfo("Paso")
+            print("Tiempo: {}".format(e-s))
+            self.num += 1
+            self.wp_pp = np.array(self.wp_pp)
+            self.size_wp_pp = self.wp_pp.shape[0]
+            self.process_ready = True
+            self.pot_active = False
+        else:
+            pass
+
+        # rospy.loginfo("Paso")
 
 if __name__ == "__main__":
     robot = PurePursuit()
