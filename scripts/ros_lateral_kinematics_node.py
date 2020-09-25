@@ -37,7 +37,7 @@ class Orientation(object):
             
 class Odom(object):
     def __init__(self):
-        self.waypoints   = np.genfromtxt('./ros_wall_follower/scripts/csv/odom_data.csv', delimiter=',')
+        self.waypoints   = np.genfromtxt('./ros_wall_follower/scripts/csv/odom_data_A*.csv', delimiter=',')
         self.current_pos = {'x': 0.0, 'y': 0.0, 'x2': 0.0, 'y2': 0.0}
         self.prev_pos    = {'x': 0.0, 'y': 0.0}
         self.current_vel = {'x': 0.0, 'y': 0.0, 'total': 0.0}
@@ -104,11 +104,11 @@ class PurePursuit(PID, Odom, Steering):
             pass
             
         self.calcLateralKinematics()
-        # self.calculateControl(self.crosstrack_error)
-        # self.delta = np.arctan2( (2 * self.wheelbase * (self.U)), (self.ld)**2 )
+        self.calculateControl(self.crosstrack_error)
+        self.delta = np.arctan2( (2 * self.wheelbase * (self.U)), (self.ld)**2 )
 
         self.steering_output = self.delta # min(max(-self.max_steering, self.delta), self.max_steering)
-        self.setCarMovement(self.steering_output, 0.00, self.waypoints[self.index, 2], 0.0, 0.0)
+        self.setCarMovement(self.steering_output, 0.00, 3.0, 0.0, 0.0)
         
         rospy.loginfo("LDCacl:{} , LD: {}, VEL: {} ".format(self.ldcalc, self.ld, self.current_vel['total']))
         rospy.loginfo("Steer: {}, Delta: {}".format(self.steering_output, self.delta))
