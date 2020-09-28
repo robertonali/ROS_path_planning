@@ -69,8 +69,11 @@ class Node(object):
 class AStar(object):
     def __init__(self):
         # Reduction factor
+        self.map = 'basement'
+        # Coordinates: Open yaml file, divide start point by 0.05 and then for x: change sign, for y: #num_of_pixels in y direction + (-start_point/0.05)
+        self.map_start = {'berlin': {'x': 232, 'y': 70}, 'skirk': {'x': 156, 'y': 272}, 'basement': {'x': 538, 'y': 970}}
         self.rs     = 4.0
-        self.start = (int(np.ceil(70/self.rs)),int(np.ceil(232/self.rs)))
+        self.start = (int(np.ceil(self.map_start[self.map]['y']/self.rs)),int(np.ceil(self.map_start[self.map]['x']/self.rs)))
         self.end = list()
         self.index2 = 0
         self.norm = 0
@@ -90,7 +93,8 @@ class AStar(object):
 
     def get_points(self):
         usr = getpass.getuser()
-        image = cv2.imread('/home/{}/catkin_ws/src/ros_wall_follower/maps/hector_slam/berlin_5cm.pgm'.format(usr))
+        map_name = 'basement_closed_hector.pgm' #'skirk_new.pgm'
+        image = cv2.imread('/home/{}/catkin_ws/src/ros_wall_follower/maps/hector_slam/{}'.format(usr, map_name))
         # cv2.imshow('ferdinand',image)
         img = cv2.resize(image, None, fx=1.0/self.rs, fy=1.0/self.rs)
         gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
@@ -149,7 +153,7 @@ class AStar(object):
                 waypoints = []
                 current = currentNode
                 while current is not None:
-                    current_wp = (0.05 * (current.position[1] - 232/self.rs), 0.05 * (70/self.rs - current.position[0]))
+                    current_wp = (0.05 * (current.position[1] - self.map_start[self.map]['x']/self.rs), 0.05 * (self.map_start[self.map]['y']/self.rs - current.position[0]))
                     path.append(current.position)
                     waypoints.append(current_wp)
                     current = current.parent

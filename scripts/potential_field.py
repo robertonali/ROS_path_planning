@@ -55,14 +55,17 @@ class Odom(object):
 
 class PotentialField(object):
     def __init__(self):
+        self.map = 'basement'
+        # Coordinates: Open yaml file, divide start point by 0.05 and then for x: change sign, for y: #num_of_pixels in y direction + (-start_point/0.05)
+        self.map_start = {'berlin': {'x': 232, 'y': 70}, 'skirk': {'x': 156, 'y': 272}, 'basement': {'x': 538, 'y': 970}}
         self.end      = list()
-        self.start    = [70, 232]
+        self.start    = [self.map_start[self.map]['y'], self.map_start[self.map]['x']]
         self.index2   = 0
         self.rs       = 1.0
         self.norm     = 0
         self.dist     = 0
         self.th       = 1*0.06  # threshold repulsivo, multiplo de track del auto track =0.28m
-        self.attr_g   = 150.0   # ganancia de atraccion, tunear
+        self.attr_g   = 1500.0   # ganancia de atraccion, tunear
         self.etha     = 6.0     # constante repulsiva, tunearla
         self.rep      = 0.0
         self.pmap_res = 0.0
@@ -91,7 +94,8 @@ class PotentialField(object):
 
     def get_points(self):
         usr =  getpass.getuser()
-        image = cv2.imread('/home/{}/catkin_ws/src/ros_wall_follower/maps/hector_slam/berlin_5cm.pgm'.format(usr))
+        map_name = 'basement_closed_hector.pgm' #'skirk_new.pgm'
+        image = cv2.imread('/home/{}/catkin_ws/src/ros_wall_follower/maps/hector_slam/{}'.format(usr, map_name))
         img = cv2.resize(image, None, fx=1.0/self.rs, fy=1.0/self.rs)
         gray = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
         ret, thresh = cv2.threshold(gray,127,255,cv2.THRESH_BINARY)
