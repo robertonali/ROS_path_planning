@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 
 import math
+import pdb
 import matplotlib.pyplot as plt
 import numpy as np
 import bisect
@@ -384,17 +385,17 @@ SIM_LOOP = 500
 
 # Parameter
 MAX_SPEED = 5.0  # maximum speed [m/s]
-MAX_ACCEL = 2.0  # maximum acceleration [m/ss]
-MAX_CURVATURE = 2.0  # maximum curvature [1/m] 
+MAX_ACCEL = 4.0  # maximum acceleration [m/ss]
+MAX_CURVATURE = 10.0  # maximum curvature [1/m] 4
 # MAX_ROAD_WIDTH = 7.0  # maximum road width [m] , calculated in LaserScan
-D_ROAD_W = 0.4  # road width sampling length [m]
-DT = 0.5  # time tick [s]
-MAX_T = 3.0  # max prediction time [m]
-MIN_T = 1.0  # min prediction time [m]
-TARGET_SPEED = 3.0  # target speed [m/s]
+D_ROAD_W = 0.2  # road width sampling length [m]
+DT = 0.2  # time tick [s]
+MAX_T = 1.5  # max prediction time [m] 2.0 
+MIN_T = 0.6  # min prediction time [m] 0.5
+TARGET_SPEED = 2.0  # target speed [m/s]
 D_T_S = 0.5  # target speed sampling length [m/s]
-N_S_SAMPLE = 2  # sampling number of target speed
-ROBOT_RADIUS = 0.4  # robot radius [m]
+N_S_SAMPLE = 2 # sampling number of target speed
+ROBOT_RADIUS = 0.3 # robot radius [m]
 
 # cost weights
 K_J = 0.1
@@ -404,9 +405,7 @@ K_LAT = 1.0
 K_LON = 1.0
 
 class Frenet(object):
-    """
-    docstring
-    """
+
     def __init__(self):
         self.t = []
         self.d = []
@@ -430,7 +429,6 @@ class Frenet(object):
 # ROS - AQUI EMPIEZA NUESTRA CHAMBA, HACIA ABAJO
 import rospy
 import pandas as pd
-import cv2
 import time
 import getpass
 from sensor_msgs.msg import LaserScan
@@ -467,7 +465,7 @@ class Orientation(object):
             
 class Odom(object):
     def __init__(self):
-        self.waypoints   = np.genfromtxt('./ros_wall_follower/scripts/csv/odom_data_frenet.csv', delimiter=',')
+        self.waypoints   = np.genfromtxt('./ros_wall_follower/scripts/csv/odom_frenet_4.csv', delimiter=',')
         self.current_pos = {'x': 0.0, 'y': 0.0, 'x2': 0.0, 'y2': 0.0}
         self.prev_pos    = {'x': 0.0, 'y': 0.0}
         self.current_vel = {'x': 0.0, 'y': 0.0, 'total': 0.0}
@@ -505,22 +503,59 @@ class FrenetPurePursuit(PID, Odom, Steering):
         self.orientation.euler['yaw'] = 0.0
 
         # LaserScan
-        self.MAX_ROAD_WIDTH = 5.0
+        self.MAX_ROAD_WIDTH = 4.0
         self.laser_angle_range = 0
-        self.laser_step = 25
+        self.laser_step = 5
         self.laser_obs = list() # Diccionario de lista x, y 
         self.obstacles_ready = False
         self.obstacles = 0 # np array
 
         # Frenet
-        self.wx = 0
-        self.wy = 0
+        # self.wx = 0
+        # self.wy = 0
             # Initial State
         self.c_speed = 5.0 # current speed [m/s]
         self.c_d = 0.0     # current lateral position [m]
         self.c_d_d = 0.0   # current lateral speed [m/s]
         self.c_d_dd = 0.0  # current lateral acceleration [m/s]
         self.s0 = 0.0      # current course position
+
+        self.wx = self.waypoints[:, 0]
+        self.wy = self.waypoints[:, 1]
+        
+        self.wp_index = 0
+
+        # Utils
+        self.move    = False
+        self.frenet_active = True
+        self.finish_wp = True
+        self.process_ready = False
+        self.num = 0
+        self.size_wp_pp = 0
+        self.size_temp_pp = 0
+        self.index      = 0
+        self.correct = False
+
+        # Waypoints
+        # self.inx_act  = 0
+        # self.iny_act  = 0
+        self.frenet_current = 0
+        self.current_wp = 0
+        self.wp_px = None
+        self.wp_py = None
+        self.wp_sd = None
+        self.temp_px = None
+        self.temp_py = None
+        self.temp_sd = None
+
+        # Count
+        self.count = 14
+        self.count_waypoint = 0
+        self.count_global = 0
+        self.count_obsta = 0
+        self.count_best = 0
+        self.cont_mike = 0
+        self.cont_dist_calc = 0
 
     
     def odomCallback(self, msg):
@@ -541,40 +576,44 @@ class FrenetPurePursuit(PID, Odom, Steering):
     def laserCallback(self, msg):
         if(self.obstacles_ready == False):
             # 0 - 1079
-            self.laser_angle_range = np.linspace(0, 1079, self.laser_step) #216
+            self.laser_angle_range = np.arange(0, 1079, self.laser_step) #216
+            self.laser_obs = list()
             # Sacar distancias 
+            mike_distancia = list()
             for i in self.laser_angle_range:
                 distance = msg.ranges[int(i)]
+                mike_distancia.append([i,distance,self.current_pos['x'],self.current_pos['y'], self.orientation.euler['yaw']])
                 if (distance <= 15.0): # modificar distancia horizonte
-                    phi = (i*0.25) - 135.0
-                    x = distance * np.cos(phi)
-                    y = -1.0*distance * np.sin(phi)
+                    phi = np.radians((i*0.25) - 135.0)
+                    x = distance * np.cos(phi + self.orientation.euler['yaw'])
+                    y = distance * np.sin(phi + self.orientation.euler['yaw']) 
                     # Global frame
                     x = x + self.current_pos['x']
                     y = y + self.current_pos['y']
-
-                    # self.laser_obs['x'].append(x)
-                    # self.laser_obs['y'].append(y)
                     self.laser_obs.append([x , y])
-                    self.obstacles_ready = True
-
-            self.MAX_ROAD_WIDTH = msg.ranges[180] + msg.ranges[900]
-
+            np.savetxt('./ros_wall_follower/scripts/csv/distancia_laser_{}_{}.csv'.format(self.count, self.cont_mike), mike_distancia, delimiter = ",")
+            np.savetxt('./ros_wall_follower/scripts/csv/distcalculado_{}_{}.csv'.format(self.count, self.cont_dist_calc), self.laser_obs, delimiter = ",")
+            self.cont_mike += 1
+            self.cont_dist_calc += 1
+            self.obstacles_ready = True
+            # self.MAX_ROAD_WIDTH = msg.ranges[180] + msg.ranges[900]
 
     def timerCallback(self, event):
-        # if self.process_ready:
-        #     if not self.move:
-        #         self.move = True
-        #         self.index = 0
-        #         self.process_ready = False
-        # if self.finish_wp and self.move:
-        #     self.finish_wp = False
-        #     self.temp_wp = self.wp_pp
-        #     self.size_temp_pp =  self.size_wp_pp
-        # if self.move:
-        #     self.takeAction()
-        #     self.drive_pub.publish(self.acker_msg)
-        pass
+        if self.process_ready:
+            if not self.move:
+                self.move = True
+                self.index = 0
+                self.process_ready = False
+        if self.finish_wp and self.move:
+            self.finish_wp = False
+            self.temp_px = self.wp_px
+            self.temp_py = self.wp_py
+            self.temp_sd = self.wp_sd
+            self.size_temp_pp =  self.size_wp_pp
+        if self.move:
+            self.takeAction()
+            self.drive_pub.publish(self.acker_msg)
+        # pass
 
 # Frenet    
     def calc_frenet_paths(self, c_speed, c_d, c_d_d, c_d_dd, s0):
@@ -628,6 +667,8 @@ class FrenetPurePursuit(PID, Odom, Steering):
             # calc global positions
             for i in range(len(fp.s)):
                 ix, iy = csp.calc_position(fp.s[i])
+                ix = ix # + self.current_pos['x']
+                iy = iy # + self.current_pos['y']
                 if ix is None:
                     break
                 i_yaw = csp.calc_yaw(fp.s[i])
@@ -656,6 +697,8 @@ class FrenetPurePursuit(PID, Odom, Steering):
 
     def check_collision(self, fp, ob):
         ob_nuevo = np.asarray(self.laser_obs)
+        # np.savetxt('./ros_wall_follower/scripts/csv/obstacles7.csv', ob_nuevo, delimiter = ",")
+        # import pdb; pdb.set_trace()
         for i in range(len(ob_nuevo[:, 0])):
             d = [((ix - ob_nuevo[i, 0]) ** 2 + (iy - ob_nuevo[i, 1]) ** 2)
                 for (ix, iy) in zip(fp.x, fp.y)]
@@ -687,19 +730,26 @@ class FrenetPurePursuit(PID, Odom, Steering):
 
 
     def frenet_optimal_planning(self, csp, s0, c_speed, c_d, c_d_d, c_d_dd, ob):
-        import pdb; pdb.set_trace()
         fplist = self.calc_frenet_paths(c_speed, c_d, c_d_d, c_d_dd, s0)
-        import pdb; pdb.set_trace()
         fplist = self.calc_global_paths(fplist, csp)
-        import pdb; pdb.set_trace()
+        fpoints = list()
+        for i in fplist:
+            for j in range(len(i.x)): 
+                fpoints.append([i.x[j], i.y[j], i.s_d[j]])
+        np.savetxt('./ros_wall_follower/scripts/csv/t_global_paths_{}_{}.csv'.format(self.count, self.count_global), fpoints, delimiter = ",")
         fplist = self.check_paths(fplist, ob)
-        import pdb; pdb.set_trace()
-
+        fpoints = list()
+        for i in fplist:
+            for j in range(len(i.x)): 
+                fpoints.append([i.x[j], i.y[j], i.s_d[j]])
+        np.savetxt('./ros_wall_follower/scripts/csv/t_obstacle_paths_{}_{}.csv'.format(self.count, self.count_obsta), fpoints, delimiter = ",")
+        self.count_global += 1
+        self.count_obsta += 1
         # fpoints = list()
         # for i in fplist:
         #     for j in range(len(i.x)): 
         #         fpoints.append([i.x[j], i.y[j], i.s_d[j]])
-        # np.savetxt('./ros_wall_follower/scripts/csv/frenet_path_8.csv', fpoints, delimiter = ",")
+        # np.savetxt('./ros_wall_follower/scripts/csv/frenet_evaluar6.csv', fpoints, delimiter = ",")
         # import pdb; pdb.set_trace()
 
         # find minimum cost path
@@ -710,12 +760,13 @@ class FrenetPurePursuit(PID, Odom, Steering):
                 min_cost = fp.cf
                 best_path = fp
         
-        # fpoints = list()
-        # for j in range(len(best_path.x)): 
-        #     fpoints.append([best_path.x[j], best_path.y[j], best_path.s_d[j], best_path.d_d[j]])
-        # np.savetxt('./ros_wall_follower/scripts/csv/frenet_bestpath_5.csv', fpoints, delimiter = ",")
+        # count = 9
+        fpoints = list()
+        for j in range(len(best_path.x)): 
+            fpoints.append([best_path.x[j], best_path.y[j], best_path.s_d[j], best_path.d_d[j]])
+        np.savetxt('./ros_wall_follower/scripts/csv/t_frenet_bestpath_{}_{}.csv'.format(self.count, self.count_best), fpoints, delimiter = ",")
+        self.count_best += 1
         # import pdb; pdb.set_trace()
-
         return best_path # Entrada pure pursuit
         
 
@@ -739,39 +790,77 @@ class FrenetPurePursuit(PID, Odom, Steering):
         self.wy = self.waypoints[:, 1]
         # obstacles ready
         # obstacles = np.asarray(self.laser_obs)
-        # Generate spline course
+        # temp = [0.0, 0.0]
+        # for i, _ in enumerate(self.wx):
+        #     if i < self.wp_index:
+        #         continue
+        #     if i < (len(self.wx) - 2):
+        #         temp[0] = np.hypot((self.wx[i] - self.current_pos['x']), (self.wy[i] - self.current_pos['y']))
+        #         temp[1] = np.hypot((self.wx[i+1] - self.current_pos['x']), (self.wy[i+1] - self.current_pos['y']))
+        #         if((temp[1] - temp[0] > 0)):
+
+        #             wx2 = self.wx[i+1::] + self.current_pos['x']
+        #             wy2 = self.wy[i+1::] - self.current_pos['y']
+        #             wx3 = self.wx[i+1::] - self.current_pos['x']
+        #             wy3 = self.wy[i+1::] + self.current_pos['y']
+        #             wx4 = self.wx[i+1::] + self.current_pos['x']
+        #             wy4 = self.wy[i+1::] + self.current_pos['y']
+
+        #             self.wx = self.wx[i+1::] - self.current_pos['x']
+        #             self.wy = self.wy[i+1::] - self.current_pos['y']
+
+        #             # self.wx = np.insert(self.wx, 0, 0.0)
+        #             # self.wy = np.insert(self.wy, 0, 0.0)
+        #             print("!!!!!!!!!!!", i - self.wp_index)
+        #             self.wp_index = i
+        #             break
+        
+        # wp_points_gen = [self.wx, self.wy, wx2, wy2, wx3, wy3, wx4, wy4]
+        # np.savetxt('./ros_wall_follower/scripts/csv/t_wayp_{}_{}.csv'.format(self.count, self.count_waypoint), wp_points_gen, delimiter = ",")
+        # self.count_waypoint +=1
+        # Generate spline course`
 
         tx, ty, tyaw, tc, csp = self.generate_target_course(self.wx, self.wy) 
 
         path = self.frenet_optimal_planning(
             csp, self.s0, self.c_speed, self.c_d, self.c_d_d, self.c_d_dd, np.asarray(self.laser_obs))
 
-        self.s0 = path.s[1]
-        self.c_d = path.d[1]
-        self.c_d_d = path.d_d[1]
-        self.c_d_dd = path.d_dd[1]
-        self.c_speed = path.s_d[1]
+        self.s0 = path.s[-1]
+        self.c_d = path.d[-1]
+        self.c_d_d = path.d_d[-1]
+        self.c_d_dd = path.d_dd[-1]
+        self.c_speed = path.s_d[-1]
+
+        # self.s0 = 0.0
+        # self.c_d = 0.0
+        # self.c_d_d = 0.0
+        # self.c_d_dd = 0.0
+        # self.c_speed = 5.0
+
+
+        return [path.x, path.y, path.s_d]
 
 # Pure Pursuit
     def timerPurePursuitCallback(self, event):
-        # self.contProcess()
-        pass
+        self.contProcess()
+        # pass
 
     def takeAction(self):
-        if (np.hypot((self.temp_wp[-1, 0] - self.current_pos['x2']),
-                            (self.temp_wp[-1, 1] - self.current_pos['y2']))
-                                <= 3.0): # Distancia Umbral
-            if not self.as_active and not self.process_ready:
-                rospy.loginfo("UMBRAL ACTIVADO")
-                self.as_active = True
-        else:
-            pass
+        # if (np.hypot((self.temp_px[-2] - self.current_pos['x2']),
+        #                     (self.temp_py[-2] - self.current_pos['y2']))
+        #                         <= 0.7): # Distancia Umbral
+        #     if not self.frenet_active and not self.process_ready:
+        #         rospy.loginfo("UMBRAL ACTIVADO")
+        #         self.frenet_active = True
+        #         self.obstacles_ready = False
+        # else:
+        #     pass
 
         # if (math.sqrt((self.waypoints[self.wp_index, 0] - self.x2) ** 2 + ((self.waypoints[self.wp_index, 1] - self.y2) ** 2))
         #         <= 1.2) :
-        if (np.hypot((self.temp_wp[self.index, 0] - self.current_pos['x2']),
-                            (self.temp_wp[self.index, 1] - self.current_pos['y2']))
-                                <= 1.2):
+        if (np.hypot((self.temp_px[self.index] - self.current_pos['x2']),
+                            (self.temp_py[self.index] - self.current_pos['y2']))
+                                <= 1.4):
             # Go to next target by adding one to the index of the waypoints list
             if self.index < self.size_temp_pp - 1:
                 self.index += 1
@@ -785,10 +874,15 @@ class FrenetPurePursuit(PID, Odom, Steering):
                 self.move = False
                 self.finish_wp = True
                 self.index = 0
+                if not self.frenet_active and not self.process_ready:
+                    rospy.loginfo("UMBRAL ACTIVADO")
+                    self.frenet_active = True
+                    self.obstacles_ready = False
+                    self.correct = True
         else:
             pass
 
-        self.vel = 2.0 if self.move else 0.0             # self.vel = 1.0 #- abs(self.steering_output) * 3.0/1.22
+        self.vel = self.temp_sd[self.index] if self.move else 0.0             # self.vel = 1.0 #- abs(self.steering_output) * 3.0/1.22
 
         if self.move:
             self.calcLateralKinematics()
@@ -802,8 +896,8 @@ class FrenetPurePursuit(PID, Odom, Steering):
 
     def calcLateralKinematics(self):
         # self.ld = math.sqrt((self.waypoints[self.wp_index,0] - self.current_pos['x2']) ** 2 + ((self.waypoints[self.wp_index,1] - self.y2) ** 2))
-        self.ld     = np.hypot((self.temp_wp[self.index, 0] - self.current_pos['x2']), (self.temp_wp[self.index, 1] - self.current_pos['y2']))
-        self.gama   = math.atan2((self.temp_wp[self.index, 1] - self.current_pos['y2']), (self.temp_wp[self.index, 0] - self.current_pos['x2']))
+        self.ld     = np.hypot((self.temp_px[self.index] - self.current_pos['x2']), (self.temp_py[self.index] - self.current_pos['y2']))
+        self.gama   = math.atan2((self.temp_py[self.index] - self.current_pos['y2']), (self.temp_px[self.index] - self.current_pos['x2']))
         self.alpha  = self.gama - self.orientation.euler['yaw']
         self.ldcalc = (self.kdd) * (self.current_vel['total']) 
         self.delta  = math.atan2((2 * self.wheelbase * math.sin(self.alpha)), (self.ldcalc))
@@ -818,22 +912,25 @@ class FrenetPurePursuit(PID, Odom, Steering):
         # self.acker_msg.drive.jerk = jerk
 
     def contProcess(self):
-        if self.first_loop:
-            rospy.loginfo("Init")
-            self.first_loop = False
-            self.get_points()
-            self.ready = True
-        if (self.as_active and self.ready and self.num < (self.index2)):
+        # if self.first_loop:
+        #     rospy.loginfo("Init")
+        #     self.first_loop = False
+        #     self.get_points()
+        #     self.ready = True
+        if ((self.frenet_active) and (self.obstacles_ready)):
             rospy.loginfo("Process")
             s = time.time() 
-            self.process()
+            [self.wp_px, self.wp_py, self.wp_sd]  = self.main()
             e = time.time()
-            print(e-s)
-            # self.index = 0
-            # self.move = True
+            print("Tiempo: {}".format(e-s))
+            self.size_wp_pp = len(self.wp_px)
+            print("Size: {}".format(self.size_wp_pp))
+            self.process_ready = True
+            self.frenet_active = False
+
         rospy.loginfo("Paso")
 
 if __name__ == "__main__":
     robot = FrenetPurePursuit()
-    robot.main()
+    # robot.main()
     rospy.spin()

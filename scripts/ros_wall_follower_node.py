@@ -110,14 +110,14 @@ class WallFollower(PID, Odom, Centroid):
 
     def getWaypoints(self):
         if ( (np.hypot((self.current_pos['x'] - self.prev_pos['x']),
-                        (self.current_pos['y'] - self.prev_pos['y']))) >= (self.wheelbase * 0.1) ):
+                        (self.current_pos['y'] - self.prev_pos['y']))) >= (0.2) ):
             self.prev_pos['x'] = self.current_pos['x']                          # Change value of prev x on dict
             self.prev_pos['y'] = self.current_pos['y']                          # Change value of prev y on dict
             waypoint_x2 = self.current_pos['x'] + ((self.wheelbase / 2) * np.cos(self.orientation.euler['yaw'])) # Get waypoint to the rear x axis
             waypoint_y2 = self.current_pos['y'] + ((self.wheelbase / 2) * np.sin(self.orientation.euler['yaw'])) # Get waypoint to the rear y axis
             self.waypoints.append( [waypoint_x2, waypoint_y2,
                                     self.current_vel['total']] )                # List appending x data
-            np.savetxt('./ros_wall_follower/scripts/csv/odom_data_zoom.csv', self.waypoints, delimiter = ",")
+            np.savetxt('./ros_wall_follower/scripts/csv/odom_data_frenet6s.csv', self.waypoints, delimiter = ",")
 
 
 if __name__ == "__main__":
